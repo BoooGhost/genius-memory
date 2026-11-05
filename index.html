@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Genius Memory (G.M.) — SillyTavern 차세대 기억 보조 확장 프로그램</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+    <style>
+        :root {
+            --bg-dark: #0b0d13;
+            --bg-card: rgba(22, 26, 38, 0.75);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --accent-blue: #3b82f6;
+            --accent-cyan: #60a5fa;
+            --accent-purple: #a855f7;
+            --accent-green: #10b981;
+            --accent-amber: #f59e0b;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.14), transparent 35%),
+                radial-gradient(circle at 85% 25%, rgba(168, 85, 247, 0.12), transparent 35%),
+                radial-gradient(circle at 50% 85%, rgba(16, 185, 129, 0.08), transparent 40%);
+            color: var(--text-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* 상단 네비게이션 */
+        nav {
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(14px);
+            background: rgba(11, 13, 19, 0.8);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .nav-inner {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 64px;
+        }
+        .brand {
+            font-weight: 800;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #fff;
+            text-decoration: none;
+        }
+        .brand span {
+            background: linear-gradient(90deg, #60a5fa, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .nav-links {
+            display: flex;
+            gap: 20px;
+            font-size: 0.9rem;
+        }
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        .nav-links a:hover { color: #fff; }
+
+        /* 히어로 섹션 (좌측 소개 + 우측 라이브 인터랙티브 데모) */
+        .hero {
+            padding: 72px 0 60px;
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 48px;
+            align-items: center;
+        }
+        .badge-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(96, 165, 250, 0.35);
+            color: #93c5fd;
+            margin-bottom: 20px;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            font-weight: 800;
+            line-height: 1.22;
+            letter-spacing: -0.02em;
+            margin-bottom: 20px;
+        }
+        .hero h1 .gradient-text {
+            background: linear-gradient(135deg, #60a5fa 0%, #c084fc 50%, #34d399 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero p.lead {
+            font-size: 1.08rem;
+            color: var(--text-muted);
+            margin-bottom: 32px;
+        }
+
+        /* 설치 링크 원클릭 복사 박스 */
+        .install-box {
+            background: rgba(15, 18, 28, 0.9);
+            border: 1px solid rgba(96, 165, 250, 0.35);
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin-bottom: 18px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        }
+        .install-label {
+            font-size: 0.78rem;
+            color: #93c5fd;
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .install-row {
+            display: flex;
+            gap: 10px;
+        }
+        .install-input {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid var(--border-color);
+            color: #e5e7eb;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.88rem;
+            outline: none;
+        }
+        .copy-btn {
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0 18px;
+            font-weight: 700;
+            font-size: 0.88rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            transition: transform 0.15s, box-shadow 0.2s;
+        }
+        .copy-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+        }
+
+        /* 🌟 우측 라이브 미니 G.M. 체험 모형 */
+        .demo-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .demo-hint {
+            font-size: 0.8rem;
+            color: #fcd34d;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            animation: floatHint 2.2s ease-in-out infinite;
+        }
+        @keyframes floatHint {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+        }
+        .mock-sidebar {
+            width: 100%;
+            max-width: 370px;
+            height: 520px;
+            background: rgba(20, 22, 30, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75);
+            position: relative;
+            overflow: hidden;
+        }
+        .mock-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.12);
+            font-weight: 700;
+            font-size: 1rem;
+        }
+        .mock-pills { display: flex; gap: 6px; }
+        .mock-pill {
+            font-size: 0.72rem;
+            padding: 3px 9px;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.18);
+            color: #ddd;
+        }
+        .mock-nav-wrap {
+            position: relative;
+            z-index: 50;
+            margin-bottom: 22px;
+        }
+        .mock-tabs {
+            display: flex;
+            gap: 6px;
+        }
+        .mock-tab {
+            flex: 1;
+            text-align: center;
+            padding: 7px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            border-radius: 6px;
+            cursor: pointer;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.12);
+            color: #9ca3af;
+            transition: all 0.2s;
+        }
+        .mock-tab.active {
+            background: rgba(59, 130, 246, 0.25);
+            border-color: #60a5fa;
+            color: #fff;
+        }
+        /* 책갈피 드로어 데모 */
+        .mock-drawer {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            pointer-events: none;
+        }
+        .mock-control-box {
+            width: 100%;
+            background: rgba(15, 17, 25, 0.97);
+            border: 1px solid #60a5fa;
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            padding: 10px;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.85);
+            display: none;
+            pointer-events: auto;
+        }
+        .mock-drawer.open .mock-control-box { display: block; }
+        .mock-bookmark {
+            pointer-events: auto;
+            cursor: pointer;
+            background: rgba(35, 45, 68, 0.95);
+            border: 1px solid rgba(96, 165, 250, 0.55);
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            padding: 3px 16px;
+            font-size: 0.74rem;
+            font-weight: 700;
+            color: #93c5fd;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .mock-pane {
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+            flex-direction: column;
+            gap: 8px;
+            padding-right: 2px;
+        }
+        .mock-pane.active { display: flex; }
+        .mock-fold {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 8px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .mock-fold-head {
+            padding: 8px 10px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            background: rgba(255,255,255,0.04);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .mock-fold-body {
+            padding: 8px 10px;
+            font-size: 0.76rem;
+            color: #d1d5db;
+            font-family: monospace;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            background: rgba(0,0,0,0.25);
+        }
+        .mock-fold.collapsed .mock-fold-body { display: none; }
+        .mock-ongoing {
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px dashed rgba(245, 158, 11, 0.5);
+            border-radius: 6px;
+            padding: 7px 10px;
+            font-size: 0.76rem;
+            color: #fde68a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .pulse-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #f59e0b; display: inline-block; margin-right: 6px;
+            box-shadow: 0 0 8px #f59e0b;
+        }
+
+        /* 섹션 공통 */
+        section { padding: 64px 0; }
+        .section-title {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+        .section-title h2 {
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+        }
+        .section-title p { color: var(--text-muted); }
+
+        /* 핵심 기능 그리드 */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 22px;
+        }
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 26px;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(96, 165, 250, 0.45);
+        }
+        .f-icon {
+            width: 44px; height: 44px;
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.25rem;
+            margin-bottom: 16px;
+        }
+        .feature-card h3 { font-size: 1.15rem; margin-bottom: 10px; }
+        .feature-card p { font-size: 0.9rem; color: var(--text-muted); }
+
+        /* 파이프라인 비교/흐름 박스 */
+        .flow-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 32px;
+            margin-top: 24px;
+        }
+        .flow-steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 18px;
+            margin-top: 20px;
+        }
+        .flow-step {
+            background: rgba(0,0,0,0.35);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 18px;
+            position: relative;
+        }
+        .step-num {
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+        .flow-step h4 { font-size: 1rem; margin-bottom: 6px; }
+        .flow-step p { font-size: 0.84rem; color: var(--text-muted); }
+
+        footer {
+            border-top: 1px solid var(--border-color);
+            padding: 36px 0;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.88rem;
+        }
+
+        @media (max-width: 860px) {
+            .hero { grid-template-columns: 1fr; text-align: center; padding-top: 40px; }
+            .hero h1 { font-size: 2.1rem; }
+            .install-row { flex-direction: column; }
+            .copy-btn { justify-content: center; padding: 12px; }
+        }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <div class="container nav-inner">
+            <a href="#" class="brand">🧠 <span>Genius Memory</span></a>
+            <div class="nav-links">
+                <a href="#features">핵심 기능</a>
+                <a href="#how-it-works">작동 원리</a>
+                <a href="#guide">사용 가이드</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- 히어로 섹션 -->
+        <section class="hero">
+            <div>
+                <div class="badge-pill">
+                    <i class="fa-solid fa-sparkles"></i> SillyTavern 차세대 장기 기억 & 상태 추적기
+                </div>
+                <h1>
+                    큰 줄기는 가볍게,<br />
+                    <span class="gradient-text">그날의 대사와 눈빛은 선명하게.</span>
+                </h1>
+                <p class="lead">
+                    <b>Genius Memory (G.M.)</b>는 거대 시뮬레이션과 장기 롤플레잉을 위해 설계된 듀얼 트랙 메모리 확장 프로그램입니다. 
+                    <b>1+5 계층형 전체 요약</b>으로 프롬프트 토큰을 극한으로 아끼면서, <b>실시간 사건 감지기 & 벡터 로어북(RAG)</b>으로 중요한 순간의 디테일을 영구 보존합니다.
+                </p>
+
+                <!-- 원클릭 설치 URL 복사 -->
+                <div class="install-box">
+                    <div class="install-label">
+                        <i class="fa-brands fa-github"></i> 실리태번 확장 프로그램 설치 주소 (Install from URL)
+                    </div>
+                    <div class="install-row">
+                        <input type="text" id="repo-url-input" class="install-input" value="https://github.com/USERNAME/genius-memory" readonly />
+                        <button class="copy-btn" id="copy-url-btn">
+                            <i class="fa-regular fa-copy"></i> 주소 복사
+                        </button>
+                    </div>
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">
+                    💡 실리태번 상단 <b>확장 프로그램(🧩) ➔ Install extension</b>에 위 주소를 붙여넣으세요.
+                </div>
+            </div>
+
+            <!-- 우측: 방문자가 직접 눌러볼 수 있는 라이브 UI 모형 -->
+            <div class="demo-wrapper">
+                <div class="demo-hint">
+                    <i class="fa-solid fa-hand-pointer"></i> 아래 탭과 <b>[🎬 요약 메뉴]</b> 책갈피를 직접 클릭해 보세요!
+                </div>
+                <div class="mock-sidebar">
+                    <div class="mock-header">
+                        <span>🧠 Genius Memory</span>
+                        <div class="mock-pills">
+                            <span class="mock-pill"><i class="fa-solid fa-download"></i> 백업</span>
+                            <span class="mock-pill"><i class="fa-solid fa-upload"></i> 복원</span>
+                        </div>
+                    </div>
+
+                    <div class="mock-nav-wrap">
+                        <div class="mock-tabs">
+                            <div class="mock-tab active" onclick="switchMockTab('main', this)">📊 메인 상태창</div>
+                            <div class="mock-tab" onclick="switchMockTab('lore', this)">📚 사건 로어북 (2)</div>
+                        </div>
+                        <div class="mock-drawer" id="mock-drawer">
+                            <div class="mock-control-box">
+                                <div style="font-size:0.78rem; margin-bottom:6px; color:#ddd;">🎬 구간: <b>18</b> ~ <b>24</b> 턴</div>
+                                <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                    <button style="flex:1; padding:5px; font-size:0.74rem; background:#2563eb; color:#fff; border:none; border-radius:4px;">🎯 구간 메인요약</button>
+                                    <button style="flex:1; padding:5px; font-size:0.74rem; background:#7c3aed; color:#fff; border:none; border-radius:4px;">📚 구간 로어북화</button>
+                                </div>
+                                <button style="width:100%; padding:5px; font-size:0.74rem; background:#374151; color:#fff; border:none; border-radius:4px;">🔄 밀린 대화 처음부터 일괄 요약</button>
+                            </div>
+                            <div class="mock-bookmark" onclick="document.getElementById('mock-drawer').classList.toggle('open')">
+                                <span>🎬 요약 메뉴</span> <i class="fa-solid fa-chevron-down"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 탭 1 모형 -->
+                    <div id="mock-pane-main" class="mock-pane active">
+                        <div class="mock-fold" onclick="this.classList.toggle('collapsed')">
+                            <div class="mock-fold-head">
+                                <span>📜 전체 스토리 요약 <small style="color:#93c5fd;">(조각: 2/5)</small></span>
+                                <i class="fa-solid fa-chevron-down"></i>
+                            </div>
+                            <div class="mock-fold-body">
+                                <div style="color:#fcd34d; font-weight:bold; margin-bottom:4px;">🏛️ 통합 전체 요약</div>
+                                - [왕립 아카데미]: 아리아와 카엘이 고대 서고의 봉인을 해제하고 첫 번째 단서를 확보함.<br><br>
+                                <div style="color:#93c5fd; font-weight:bold; margin-bottom:4px;">🧩 #1번째 요약 조각 (1~10턴)</div>
+                                - [기숙사 옥상]: 카엘 -> 야간 정찰 제안 -> 아리아 수락.
+                            </div>
+                        </div>
+                        <div class="mock-fold" onclick="this.classList.toggle('collapsed')">
+                            <div class="mock-fold-head">
+                                <span>❤️ 관계 및 심리 ([STATE])</span>
+                                <i class="fa-solid fa-chevron-down"></i>
+                            </div>
+                            <div class="mock-fold-body">
+                                - 카엘: [경계심] -> [아리아의 희생 목격] -> [깊은 신뢰 및 보호 본능]<br>
+                                - 아리아: [불안] -> [비밀 공유] -> [유대감 형성]
+                            </div>
+                        </div>
+                        <div class="mock-fold collapsed" onclick="this.classList.toggle('collapsed')">
+                            <div class="mock-fold-head">
+                                <span>🎯 목표 및 약속 ([OPEN])</span>
+                                <i class="fa-solid fa-chevron-down"></i>
+                            </div>
+                            <div class="mock-fold-body">
+                                - 보름달이 뜨는 밤 시계탑에서 재회하기로 약속 · 지하 미궁 열쇠 해독 필요
+                            </div>
+                        </div>
+                        <div class="mock-fold collapsed" onclick="this.classList.toggle('collapsed')">
+                            <div class="mock-fold-head">
+                                <span>🎒 인벤토리 ([ITEMS])</span>
+                                <i class="fa-solid fa-chevron-down"></i>
+                            </div>
+                            <div class="mock-fold-body">
+                                - 카엘: 은빛 단검, 부서진 회중시계<br>
+                                - 아리아: 고대 금서의 반쪽 페이지
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 탭 2 모형 -->
+                    <div id="mock-pane-lore" class="mock-pane">
+                        <div style="font-size:0.75rem; font-weight:bold; color:#fcd34d;">⏳ 기록 중 (진행 중인 사건)</div>
+                        <div class="mock-ongoing">
+                            <span><span class="pulse-dot"></span>[별관 잠입 작전] (14턴~ 진행 중)</span>
+                            <span style="color:#6ee7b7; font-weight:bold;">✅ 완료</span>
+                        </div>
+                        <div style="font-size:0.75rem; font-weight:bold; color:#6ee7b7; margin-top:4px;">✅ 완료된 사건 (로어북 & 벡터 활성화)</div>
+                        <div class="mock-fold" style="border-color:#34d399;" onclick="this.classList.toggle('collapsed')">
+                            <div class="mock-fold-head">
+                                <span style="color:#93c5fd;">#1 (3~8턴) <b style="color:#fcd34d;">[온실에서의 점심 식사]</b></span>
+                                <span style="font-size:0.7rem; background:rgba(16,185,129,0.25); color:#6ee7b7; padding:1px 6px; border-radius:8px;">🔥 호출됨 (0.68)</span>
+                            </div>
+                            <div class="mock-fold-body">
+                                <div style="color:#fcd34d; margin-bottom:4px;">🔑 키워드: 온실, 점심 식사, 홍차, 회중시계</div>
+                                • 카엘 (시선을 피하며 머뭇거림) -> 아리아에게 낡은 회중시계를 건넴 : "네가 가지고 있어. 잃어버리면 가만 안 둬." -> 아리아 (놀라며 미소)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 핵심 기능 4가지 -->
+        <section id="features">
+            <div class="section-title">
+                <h2>왜 Genius Memory인가요?</h2>
+                <p>단순한 줄거리 요약을 넘어, TRPG와 다인 시뮬레이션에 필요한 모든 기억 장치를 하나로 통합했습니다.</p>
+            </div>
+
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="f-icon" style="background:rgba(59,130,246,0.15); color:#60a5fa;">
+                        <i class="fa-solid fa-layer-group"></i>
+                    </div>
+                    <h3>1+5 계층형 전체 요약 & 자동 숨김</h3>
+                    <p>
+                        최근 보호 버퍼를 제외한 대화를 요약해 <b>1~5번 조각 슬롯</b>에 채우고, 5개가 모이면 <b>[통합 전체 요약]</b>으로 자동 압축합니다. 요약된 과거 메시지는 자동으로 숨김(유령) 처리되어 토큰을 아껴줍니다.
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="f-icon" style="background:rgba(245,158,11,0.15); color:#fbbf24;">
+                        <i class="fa-solid fa-satellite-dish"></i>
+                    </div>
+                    <h3>실시간 다중 사건 감지기 (기록 중 ➔ 완료)</h3>
+                    <p>
+                        매 턴 가벼운 감지기가 사건의 <b>시작 턴</b>을 포착해 <code>[⏳ 기록 중]</code>에 걸어두고, 사건이 끝나는 순간 시작~끝 턴 원문을 통째로 읽어 <b>표정, 제스처, 실제 대사("")</b>가 살아있는 고밀도 로어북을 생성합니다.
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="f-icon" style="background:rgba(16,185,129,0.15); color:#34d399;">
+                        <i class="fa-solid fa-magnifying-glass-chart"></i>
+                    </div>
+                    <h3>로어북 키워드 + 256차원 벡터 RAG</h3>
+                    <p>
+                        별도의 유료 임베딩 API 설정 없이도 즉시 작동하는 <b>한국어 특화 로컬 바이그램 벡터 엔진</b>이 내장되어 있습니다. 현재 대화 맥락과 유사도가 높은 과거 사건만 골라 프롬프트에 자동 주입합니다.
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="f-icon" style="background:rgba(168,85,247,0.15); color:#c084fc;">
+                        <i class="fa-solid fa-users-viewfinder"></i>
+                    </div>
+                    <h3>다중 인물 관계도 · 약속 · 인벤토리</h3>
+                    <p>
+                        기계적인 <code>{{char}}</code> 표기 대신 대화에 등장하는 <b>모든 캐릭터의 실제 이름</b>으로 심리/관계 변화 궤적(<code>[STATE]</code>), 미해결 목표와 약속(<code>[OPEN]</code>), 보유 아이템(<code>[ITEMS]</code>)을 추적합니다.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 작동 원리 -->
+        <section id="how-it-works">
+            <div class="section-title">
+                <h2>듀얼 트랙 메모리 파이프라인</h2>
+                <p>서브 API(Gemini Flash, Kimi 등 가성비 모델)를 활용해 본 채팅의 속도와 비용에 부담을 주지 않습니다.</p>
+            </div>
+
+            <div class="flow-box">
+                <div class="flow-steps">
+                    <div class="flow-step">
+                        <div class="step-num">Track 01 · 매 턴 감지</div>
+                        <h4>⏳ 사건 시작 & 종료 포착</h4>
+                        <p>진행 중인 사건이 여러 개 겹쳐도 각각 독립된 스레드로 추적하다가, 사건이 종료되면 해당 턴 구간의 대사만 핀셋 추출해 로어북으로 남깁니다.</p>
+                    </div>
+                    <div class="flow-step">
+                        <div class="step-num">Track 02 · N턴 주기</div>
+                        <h4>📜 상태창 갱신 & 대화 숨김</h4>
+                        <p>최신 버퍼(예: 2턴)를 보호하고 확정된 과거 턴을 요약하여 조각 슬롯과 관계/목표/인벤토리를 갱신한 뒤, 원문에는 <code>[요약됨]</code> 점선을 남기고 숨깁니다.</p>
+                    </div>
+                    <div class="flow-step">
+                        <div class="step-num">Track 03 · 프롬프트 주입</div>
+                        <h4>⚡ Chat History 직전 결합</h4>
+                        <p>본 채팅 전송 시 <b>[전체 요약 + 벡터로 소환된 과거 사건 + 현재 상태창]</b>을 채팅 내역 바로 위에 깔끔하게 삽입하여 완벽한 기억력을 유지합니다.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 사용 가이드 -->
+        <section id="guide">
+            <div class="section-title">
+                <h2>스마트 UX & 사용 꿀팁</h2>
+                <p>유저의 클릭 횟수를 최소화하기 위해 세심하게 설계된 편의 기능들입니다.</p>
+            </div>
+
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3>🔖 책갈피 팝업 & 장면 선택 (<code>&lt;</code> <code>&gt;</code>)</h3>
+                    <p>
+                        각 메시지의 <b>점 3개(<code>...</code>) 메뉴</b>를 누르면 나오는 <code>&lt;</code>(시작), <code>&gt;</code>(끝) 버튼으로 원하는 구간만 콕 집어 요약하거나 사건 로어북으로 만들 수 있습니다. 어느 탭에서나 상단 책갈피를 당겨 실행하세요.
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <h3>✨ 자동 저장 & 원클릭 롤백</h3>
+                    <p>
+                        번거로운 수동 저장 버튼 대신, 내용을 고친 뒤 <b>사이드바를 닫거나 다음 채팅을 입력하면 즉시 자동 저장</b>됩니다. 수정 중 마음에 들지 않으면 하단의 <b>롤백 버튼</b>으로 언제든 되돌릴 수 있습니다.
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <h3>🔄 기존 채팅방도 처음부터 일괄 요약</h3>
+                    <p>
+                        이미 수십~수백 턴 진행된 채팅방이라도 걱정하지 마세요. 책갈피 메뉴의 <b>[밀린 대화 처음부터 일괄 요약]</b> 버튼 하나로 처음부터 차곡차곡 기억을 구축할 수 있습니다.
+                    </p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <footer>
+        <div class="container">
+            <p><b>🧠 Genius Memory (G.M.)</b> — Built for SillyTavern Roleplayers & Storytellers.</p>
+        </div>
+    </footer>
+
+    <script>
+        // 1. GitHub Pages 주소(username.github.io/repo)를 감지해 자동으로 설치 URL로 변환!
+        (function autoDetectRepoUrl() {
+            const host = window.location.hostname;
+            const pathParts = window.location.pathname.split('/').filter(Boolean);
+            const inputEl = document.getElementById('repo-url-input');
+            if (host.endsWith('.github.io') && pathParts.length > 0) {
+                const username = host.replace('.github.io', '');
+                const repoName = pathParts[0];
+                inputEl.value = `https://github.com/${username}/${repoName}`;
+            }
+        })();
+
+        // 2. 설치 주소 원클릭 복사
+        document.getElementById('copy-url-btn').addEventListener('click', function () {
+            const inputEl = document.getElementById('repo-url-input');
+            navigator.clipboard.writeText(inputEl.value).then(() => {
+                const originalHtml = this.innerHTML;
+                this.innerHTML = '<i class="fa-solid fa-check"></i> 복사 완료!';
+                this.style.background = '#10b981';
+                setTimeout(() => {
+                    this.innerHTML = originalHtml;
+                    this.style.background = '';
+                }, 2000);
+            });
+        });
+
+        // 3. 우측 라이브 데모 탭 전환
+        function switchMockTab(tab, el) {
+            document.querySelectorAll('.mock-tab').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
+            document.querySelectorAll('.mock-pane').forEach(p => p.classList.remove('active'));
+            document.getElementById('mock-pane-' + tab).classList.add('active');
+        }
+    </script>
+</body>
+</html>

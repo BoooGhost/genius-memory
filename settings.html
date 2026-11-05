@@ -1,0 +1,193 @@
+<!-- 실리태번 확장 프로그램 탭 설정 메뉴 -->
+<div class="genius-memory-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>🧠 Genius Memory (GM)</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <div class="flex-container flexFlowColumn">
+                <label class="checkbox_label" for="gm_enabled">
+                    <input type="checkbox" id="gm_enabled" />
+                    <span>Genius Memory 활성화 (자동 요약 & 프롬프트 주입)</span>
+                </label>
+                <hr>
+                <h4>🔌 서브 API 설정 (OpenAI 호환 규격)</h4>
+                <label for="gm_api_url">API Endpoint URL <small>(뒤에 /v1 까지만 입력)</small></label>
+                <input type="text" id="gm_api_url" class="text_pole" placeholder="예: https://generativelanguage.googleapis.com/v1beta/openai" />
+                
+                <label for="gm_api_key">API Key</label>
+                <input type="password" id="gm_api_key" class="text_pole" placeholder="API 키 입력..." />
+                
+                <label for="gm_model">Model Name</label>
+                <input type="text" id="gm_model" class="text_pole" placeholder="예: gemini-1.5-flash 또는 moonshot-v1-8k" />
+                
+                <hr>
+                <h4>⚙️ 요약 및 버퍼 설정</h4>
+                <label for="gm_chunk_size">최소 요약 단위 (턴 수)</label>
+                <input type="number" id="gm_chunk_size" class="text_pole" min="2" max="50" value="10" />
+                
+                <label for="gm_buffer_size">최근 대화 보호 버퍼 (요약 제외할 최신 턴 수)</label>
+                <input type="number" id="gm_buffer_size" class="text_pole" min="0" max="20" value="2" />
+
+                <label for="gm_consolidate_count">전체 요약 압축 기준 (N개 쌓이면 하나로 통합)</label>
+                <input type="number" id="gm_consolidate_count" class="text_pole" min="2" max="15" value="5" />
+
+                <hr>
+                <h4>📚 개별 사건 로어북 & 벡터 검색 (RAG)</h4>
+                <label class="checkbox_label" for="gm_auto_detect_events">
+                    <input type="checkbox" id="gm_auto_detect_events" />
+                    <span>⚡ 매 턴 사건 시작/종료 자동 감지 (로어북 자동 기록)</span>
+                </label>
+                <label for="gm_recall_top_k">최대 동시 호출 사건 수 (Top-K)</label>
+                <input type="number" id="gm_recall_top_k" class="text_pole" min="1" max="10" value="3" />
+
+                <label for="gm_embed_model">임베딩 API 모델명 <small>(비워두면 내장 로컬 벡터 엔진 사용)</small></label>
+                <input type="text" id="gm_embed_model" class="text_pole" placeholder="비워두면 무료 로컬 벡터 / 예: text-embedding-3-small" />
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 화면 오른쪽에 열릴 사이드바 본체 -->
+<div id="gm-sidebar">
+    <<div class="gm-sidebar-header">
+        <span style="white-space:nowrap;">🧠 Genius Memory</span>
+        <div class="gm-header-actions">
+            <div id="gm-export-btn" class="gm-pill-btn" title="현재 기억 백업 내보내기 (.json)">
+                <i class="fa-solid fa-download"></i><span>백업</span>
+            </div>
+            <div id="gm-import-btn" class="gm-pill-btn" title="백업 파일 불러오기 (.json)">
+                <i class="fa-solid fa-upload"></i><span>복원</span>
+            </div>
+            <input type="file" id="gm-import-file" accept=".json" style="display:none;" />
+            <div id="gm-close-btn" class="gm-close-icon-btn" title="닫기 (변경사항 자동 저장)">
+                <i class="fa-solid fa-xmark"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🌟 상단 탭 스위치 + 책갈피 팝업 레이어 래퍼 -->
+    <div class="gm-nav-wrapper">
+        <div class="gm-tabs">
+            <div class="gm-tab-btn active" data-tab="gm-tab-main">📊 메인 상태창</div>
+            <div class="gm-tab-btn" data-tab="gm-tab-lore">📚 사건 로어북 <span id="gm-lore-count">(0)</span></div>
+        </div>
+
+        <!-- 🌟 탭 바 밑에 찰싹 붙는 별도 레이어 (팝업 컨트롤 박스 + 책갈피 손잡이) -->
+        <div id="gm-drawer-layer" class="gm-drawer-layer">
+            <div class="gm-control-box">
+                <div class="gm-range-row">
+                    <span>🎬 구간:</span>
+                    <input type="number" id="gm-start-turn" class="text_pole gm-range-input" min="1" placeholder="시작" />
+                    <span>~</span>
+                    <input type="number" id="gm-end-turn" class="text_pole gm-range-input" min="1" placeholder="끝" />
+                    <span style="font-size:0.85em; color:#aaa;">턴</span>
+                    <button id="gm-clear-range-btn" class="menu_button" style="width:auto; padding:2px 8px; margin-left:auto; font-size:0.78em;">초기화</button>
+                </div>
+                <div class="gm-btn-group">
+                    <button id="gm-range-sum-btn" class="menu_button" title="선택 구간을 메인 상태창에 요약하고 숨깁니다.">🎯 구간 메인요약</button>
+                    <button id="gm-range-lore-btn" class="menu_button" title="선택 구간을 사건 로어북으로 세세히 기록합니다.">📚 구간 로어북화</button>
+                </div>
+                <div class="gm-btn-group">
+                    <button id="gm-batch-sum-btn" class="menu_button" title="밀린 대화를 처음부터 끝(버퍼 제외)까지 일괄 요약합니다.">🔄 밀린 대화 처음부터 일괄 요약</button>
+                </div>
+            </div>
+
+            <!-- 중앙에 책갈피처럼 튀어나와 있는 토글 버튼 -->
+            <div id="gm-bookmark-btn" title="요약 도구 메뉴 열기/접기">
+                <span id="gm-bookmark-text">🎬 요약 메뉴</span>
+                <i class="fa-solid fa-chevron-down gm-bookmark-arrow"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- [탭 1] 메인 상태창 (이제 위쪽 공간이 확 넓어집니다!) -->
+    <div id="gm-tab-main" class="gm-tab-pane active">
+
+        <!-- 🌟 메인 상태창 스크롤 영역 (토글 박스들) -->
+        <div class="gm-scroll-area">
+            <!-- 1. 전체 스토리 요약 (마스터 요약 + 조각 1~5 슬롯) -->
+            <div class="gm-fold-box">
+                <div class="gm-fold-header">
+                    <span>📜 전체 스토리 요약 <small id="gm-chunk-counter" style="color:#93c5fd;">(조각: 0/5)</small></span>
+                    <i class="fa-solid fa-chevron-down gm-fold-icon"></i>
+                </div>
+                <div class="gm-fold-body">
+                    <div style="font-size:0.76em; color:#fcd34d; font-weight:bold;">🏛️ 통합 전체 요약 (누적 압축본)</div>
+                    <textarea id="gm-macro-summary" class="gm-textarea" style="min-height:85px;" placeholder="조각이 5개 쌓이면 이곳으로 통합 압축됩니다."></textarea>
+                    
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+                        <span style="font-size:0.76em; color:#93c5fd; font-weight:bold;">🧩 최근 요약 조각 (1~5단계)</span>
+                        <button id="gm-manual-merge-btn" class="menu_button" style="width:auto; padding:1px 6px; margin:0; font-size:0.72em;" title="현재 쌓인 조각들을 즉시 통합 요약으로 합칩니다.">⚡ 지금 통합</button>
+                    </div>
+                    <div id="gm-chunk-slots-container" style="display:flex; flex-direction:column; gap:5px;"></div>
+                </div>
+            </div>
+
+            <!-- 2. 관계 및 심리 -->
+            <div class="gm-fold-box">
+                <div class="gm-fold-header">
+                    <span>❤️ 관계 및 심리 ([STATE])</span>
+                    <i class="fa-solid fa-chevron-down gm-fold-icon"></i>
+                </div>
+                <div class="gm-fold-body">
+                    <textarea id="gm-state-tracker" class="gm-textarea" placeholder="각 등장인물의 심리/관계 변화가 기록됩니다."></textarea>
+                </div>
+            </div>
+
+            <!-- 3. 목표 및 약속 -->
+            <div class="gm-fold-box gm-collapsed">
+                <div class="gm-fold-header">
+                    <span>🎯 목표 및 약속 ([OPEN])</span>
+                    <i class="fa-solid fa-chevron-down gm-fold-icon"></i>
+                </div>
+                <div class="gm-fold-body">
+                    <textarea id="gm-open-tracker" class="gm-textarea" placeholder="약속, 퀘스트, 미해결 사건이 기록됩니다."></textarea>
+                </div>
+            </div>
+
+            <!-- 4. 인벤토리 -->
+            <div class="gm-fold-box gm-collapsed">
+                <div class="gm-fold-header">
+                    <span>🎒 인벤토리 ([ITEMS])</span>
+                    <i class="fa-solid fa-chevron-down gm-fold-icon"></i>
+                </div>
+                <div class="gm-fold-body">
+                    <textarea id="gm-items-tracker" class="gm-textarea" placeholder="보유 중인 아이템이 기록됩니다."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="gm-btn-group">
+            <button id="gm-rollback-state-btn" class="menu_button gm-rollback-btn" title="저장 전 직접 수정한 내용을 취소하고 마지막 저장 상태로 되돌립니다.">
+                <i class="fa-solid fa-rotate-left"></i> 마지막 저장값으로 롤백 (수정 취소)
+            </button>
+        </div>
+    </div>
+
+    <!-- [탭 2] 개별 사건 로어북 ([기록 중] / [완료] 분리) -->
+    <div id="gm-tab-lore" class="gm-tab-pane">
+        <div class="gm-scroll-area">
+            <!-- 1. 기록 중 (진행 중인 사건) -->
+            <div class="gm-sub-title">
+                <span>⏳ 기록 중 (진행 중인 사건)</span>
+                <span id="gm-add-ongoing-btn" class="gm-pill-btn" style="padding:1px 7px; font-size:0.85em;" title="현재 진행 중인 사건을 수동으로 걸어둡니다.">➕ 사건 시작 걸기</span>
+            </div>
+            <div id="gm-ongoing-list"></div>
+
+            <!-- 2. 완료된 사건 (로어북 & 벡터 작동 중) -->
+            <div class="gm-sub-title" style="color:#6ee7b7; border-top:1px solid #444; padding-top:8px;">
+                <span>✅ 완료된 사건 (로어북 & 벡터 활성화)</span>
+            </div>
+            <div id="gm-lore-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+
+        <div class="gm-btn-group">
+            <button id="gm-add-lore-btn" class="menu_button">➕ 빈 완료 사건 추가</button>
+            <button id="gm-rollback-lore-btn" class="menu_button gm-rollback-btn" title="저장 전 수정한 로어북 내용을 취소하고 되돌립니다.">
+                <i class="fa-solid fa-rotate-left"></i> 수정 취소 (롤백)
+            </button>
+        </div>
+    </div>
+</div>

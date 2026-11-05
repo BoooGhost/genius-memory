@@ -1,0 +1,11 @@
+{
+    "display_name": "Genius Memory (GM)",
+    "loading_order": 10,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "User & Gemini",
+    "version": "0.1.0",
+    "homePage": ""
+}

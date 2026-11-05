@@ -1,0 +1,473 @@
+/* 우측 사이드바 본체 (모바일 크롬 100dvh 및 하단 안전 여백 완벽 대응) */
+#gm-sidebar {
+    position: fixed;
+    top: 0;
+    right: -400px;
+    width: 360px;
+    max-width: 94vw; /* 모바일 화면에서 가로가 넘치지 않게 보호 */
+    height: 100vh;
+    height: 100dvh; /* 🌟 모바일 크롬 주소창/하단바를 제외한 실제 보이는 화면 높이에 딱 맞춤! */
+    background-color: var(--SmartThemeBlurTintColor, rgba(20, 20, 20, 0.95));
+    border-left: 1px solid var(--SmartThemeBorderColor, #444);
+    z-index: 2000;
+    transition: right 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    display: flex;
+    flex-direction: column;
+    padding: 14px 14px calc(18px + env(safe-area-inset-bottom, 0px)) 14px;
+    box-sizing: border-box;
+    backdrop-filter: blur(10px);
+    box-shadow: -5px 0 15px rgba(0,0,0,0.5);
+}
+#gm-sidebar.gm-open {
+    right: 0;
+}
+
+/* 모바일 화면 전용 추가 여백 보정 */
+@media (max-width: 768px) {
+    #gm-sidebar {
+        width: 340px;
+        padding-bottom: calc(26px + env(safe-area-inset-bottom, 12px));
+    }
+}
+
+.gm-sidebar-header {
+    font-size: 1.15em;
+    font-weight: bold;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #555);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#gm-close-btn {
+    cursor: pointer;
+    font-size: 1.2em;
+    color: var(--SmartThemeQuoteColor, #aaa);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+#gm-close-btn:hover {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+
+.gm-range-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    font-size: 0.85em;
+}
+.gm-range-input {
+    width: 55px !important;
+    text-align: center;
+    padding: 3px !important;
+    height: 26px !important;
+}
+
+/* 🌟 탭 바 및 책갈피 팝업 기준점 */
+.gm-nav-wrapper {
+    position: relative;
+    z-index: 100; /* 아래 스크롤 내용물보다 항상 위 레이어에 위치 */
+    flex-shrink: 0;
+    margin-bottom: 18px; /* 접혀 있을 때 책갈피 손잡이가 차지할 얇은 여백 */
+}
+
+.gm-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 0;
+    position: relative;
+    z-index: 102;
+}
+
+/* 🌟 탭 바 바로 밑에 찰싹 붙는 팝업 레이어 */
+.gm-drawer-layer {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 101;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none; /* 투명한 여백 부분은 아래 내용 클릭을 방해하지 않음 */
+}
+
+/* 팝업 본체 (평소엔 숨김, 열렸을 때만 공중에 뜸) */
+.gm-control-box {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(18, 18, 22, 0.96);
+    backdrop-filter: blur(12px);
+    border: 1px solid #60a5fa;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    padding: 10px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.85);
+    pointer-events: auto;
+    display: none; /* 기본 숨김 */
+}
+
+.gm-drawer-layer.gm-open .gm-control-box {
+    display: block; /* 책갈피 누르면 찰싹 붙어 나타남 */
+    animation: gmSlideDown 0.18s ease-out;
+}
+
+@keyframes gmSlideDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* 🌟 책갈피 모양 손잡이 버튼 */
+#gm-bookmark-btn {
+    pointer-events: auto;
+    cursor: pointer;
+    background: rgba(35, 42, 58, 0.95);
+    border: 1px solid rgba(96, 165, 250, 0.5);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    padding: 2px 16px 3px 16px;
+    font-size: 0.74em;
+    font-weight: bold;
+    color: #93c5fd;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+    user-select: none;
+    transition: all 0.2s;
+}
+#gm-bookmark-btn:hover {
+    background: rgba(59, 130, 246, 0.35);
+    color: #fff;
+    padding-top: 4px; /* 마우스 올리면 책갈피가 살짝 내려오는 효과 */
+}
+
+.gm-bookmark-arrow {
+    font-size: 0.85em;
+    transition: transform 0.2s;
+}
+.gm-drawer-layer.gm-open .gm-bookmark-arrow {
+    transform: rotate(180deg); /* 열리면 화살표가 위로(▲) 뒤집힘 */
+}
+
+.gm-tab-btn {
+    flex: 1;
+    text-align: center;
+    padding: 6px;
+    font-size: 0.85em;
+    font-weight: bold;
+    border-radius: 5px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    color: var(--SmartThemeQuoteColor, #aaa);
+}
+.gm-tab-btn.active {
+    background: rgba(59, 130, 246, 0.25);
+    border-color: #60a5fa;
+    color: #fff;
+}
+.gm-tab-pane {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0; /* Flex 스크롤 핵심 속성 */
+}
+.gm-tab-pane.active {
+    display: flex;
+}
+
+/* 스크롤 영역 */
+.gm-scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+}
+
+/* 🌟 접기/펼치기 아코디언 토글 박스 (상태창 & 로어북 공통) */
+.gm-fold-box {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--SmartThemeBorderColor, #4a4a4a);
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.gm-fold-header {
+    padding: 7px 10px;
+    background: rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.83em;
+    font-weight: bold;
+    user-select: none;
+}
+.gm-fold-header:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+.gm-fold-body {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.gm-fold-box.gm-collapsed .gm-fold-body {
+    display: none; /* 접혔을 때 숨김 */
+}
+.gm-fold-icon {
+    transition: transform 0.2s;
+    font-size: 0.85em;
+    color: #aaa;
+}
+.gm-fold-box.gm-collapsed .gm-fold-icon {
+    transform: rotate(-90deg);
+}
+
+/* 요약 조각 1~5번 서브 슬롯 */
+.gm-chunk-slot {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 5px;
+}
+.gm-chunk-label {
+    font-size: 0.76em;
+    color: #93c5fd;
+    margin-bottom: 3px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.gm-textarea {
+    width: 100%;
+    min-height: 70px;
+    resize: vertical;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid var(--SmartThemeBorderColor, #555);
+    color: var(--SmartThemeBodyColor, #eee);
+    padding: 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.8em;
+    line-height: 1.35;
+    box-sizing: border-box;
+}
+
+.gm-btn-group {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    flex-shrink: 0;
+}
+.gm-btn-group .menu_button {
+    flex: 1;
+    margin: 0;
+    padding: 6px 4px;
+    font-size: 0.8em;
+    white-space: nowrap;
+}
+
+/* 사건 로어북 카드 스타일 */
+.gm-lore-card.gm-recalled {
+    border-color: #34d399;
+    box-shadow: 0 0 6px rgba(52, 211, 153, 0.2);
+}
+.gm-lore-badge {
+    font-size: 0.85em;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #ccc;
+}
+.gm-lore-card.gm-recalled .gm-lore-badge {
+    background: rgba(16, 185, 129, 0.25);
+    color: #6ee7b7;
+}
+.gm-lore-keys {
+    width: 100%;
+    font-size: 0.78em !important;
+    padding: 4px 6px !important;
+    background: rgba(0, 0, 0, 0.4) !important;
+    border: 1px solid var(--SmartThemeBorderColor, #444) !important;
+    color: #fcd34d !important;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+.gm-lore-del {
+    cursor: pointer;
+    color: #f87171;
+    padding: 2px 6px;
+    margin-left: 4px;
+}
+.gm-deleting {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+/* 채팅창 점선 & 점 3개 메뉴 버튼 */
+.gm-summary-divider {
+    width: 100%;
+    text-align: center;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.45);
+    line-height: 0.1em;
+    margin: 22px 0 14px 0;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.8em;
+    user-select: none;
+    cursor: pointer;
+}
+.gm-summary-divider span {
+    background: var(--SmartThemeChatTintColor, #1a1a1a);
+    padding: 3px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.gm-scene-btn {
+    font-weight: 900;
+    font-family: monospace;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.gm-scene-btn:hover { color: #60a5fa !important; }
+.mes.gm-in-range { background-color: rgba(59, 130, 246, 0.07) !important; }
+.mes.gm-range-start { border-top: 2px solid #3b82f6 !important; }
+.mes.gm-range-end { border-bottom: 2px solid #a855f7 !important; }
+
+/* 🌟 세련된 상단 헤더 캡슐 버튼 (절대 세로로 안 깨짐) */
+.gm-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.gm-pill-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    font-size: 0.75em;
+    font-weight: 600;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: var(--SmartThemeBodyColor, #eee);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+.gm-pill-btn:hover {
+    background: rgba(59, 130, 246, 0.25);
+    border-color: #60a5fa;
+    color: #fff;
+    transform: translateY(-1px);
+}
+.gm-close-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    cursor: pointer;
+    color: #aaa;
+    transition: all 0.2s;
+}
+.gm-close-icon-btn:hover {
+    background: rgba(248, 113, 113, 0.2);
+    color: #f87171;
+}
+
+/* 🌟 하단 롤백 버튼 (수정사항이 생기면 주황빛으로 활성화 표시) */
+.gm-rollback-btn {
+    opacity: 0.55;
+    transition: all 0.2s;
+}
+.gm-rollback-btn.gm-has-unsaved {
+    opacity: 1;
+    border-color: #f59e0b !important;
+    color: #fcd34d !important;
+    background: rgba(245, 158, 11, 0.12) !important;
+}
+
+/* 🌟 4-B단계: [기록 중] 진행 사건 리스트 디자인 */
+.gm-sub-title {
+    font-size: 0.8em;
+    font-weight: bold;
+    color: #fcd34d;
+    margin: 4px 0 6px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+#gm-ongoing-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+    flex-shrink: 0;
+}
+.gm-ongoing-card {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px dashed rgba(245, 158, 11, 0.5);
+    border-radius: 6px;
+    padding: 6px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8em;
+}
+.gm-ongoing-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #fde68a;
+    font-weight: bold;
+}
+.gm-pulse-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #f59e0b;
+    border-radius: 50%;
+    display: inline-block;
+    animation: gmPulse 1.5s infinite;
+}
+@keyframes gmPulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+.gm-ongoing-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+.gm-finish-event-btn {
+    padding: 2px 7px;
+    font-size: 0.75em;
+    border-radius: 4px;
+    background: rgba(16, 185, 129, 0.25);
+    border: 1px solid #34d399;
+    color: #6ee7b7;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.gm-finish-event-btn:hover {
+    background: rgba(16, 185, 129, 0.45);
+    color: #fff;
+}

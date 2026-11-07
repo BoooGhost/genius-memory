@@ -829,6 +829,76 @@ async function detectEventsOnTurn() {
     }
 }
 
+// 🌟 일괄 요약 시 구간 내의 모든 [완료된 사건]과 [진행 중 사건]의 시작~끝 턴을 찾아내는 스캐너 프롬프트
+const BATCH_EVENT_SCANNER_PROMPT = `Role: Narrative Event Boundary Scanner.
+Analyze the provided RP dialogue turns and [Currently Ongoing Events].
+Identify:
+1. All distinct narrative events/scenes that COMPLETED within these turns (including any [Currently Ongoing Events] that concluded during these turns).
+2. Any notable event/scene that STARTED within these turns and is STILL ONGOING at the very last turn provided.
+
+Output ONLY using one or more lines in this exact format (in the same language as the dialogue, or write NONE):
+COMPLETED: [Event Title] | [Start Turn Number] | [End Turn Number]
+ONGOING: [Event Title] | [Start Turn Number]`;
+
+// 🌟 일괄 요약 중 해당 구간의 사건들을 스캔하여 로어북([완료] 및 [기록 중])을 자동 구축하는 함수
+async function scanAndSummarizeEventsForBatch(batchIndices) {
+    const context = getContext();
+    const chat = context?.chat;
+    const gmData = getChatGMData();
+    if (!chat || !gmData || batchIndices.length === 0) return;
+
+    const sTurn = batchIndices[0] + 1;
+    const eTurn = batchIndices[batchIndices.length - 1] + 1;
+    toastr.info(`🔍 ${sTurn}~${eTurn}턴 구간의 사건 로어북을 스캔 중...`, "🧠 Genius Memory");
+
+    const lines = batchIndices.map(idx => `[Turn ${idx + 1}] ${chat[idx].name}: ${chat[idx].mes}`).join("\n\n");
+    const ongoingListStr = gmData.ongoing_events.length > 0
+        ? gmData.ongoing_events.map(e => `- "${e.title}" (Started at Turn ${e.startTurn})`).join("\n")
+        : "None";
+
+    const scannerInput = `[Currently Ongoing Events]\n${ongoingListStr}\n\n[Dialogue (Turns ${sTurn} to ${eTurn})]\n${lines}`;
+    const result = await callSubAPI(BATCH_EVENT_SCANNER_PROMPT, scannerInput);
+
+    // 1) 구간 내에서 완료된 사건들 -> 각각 시작~끝 턴을 정밀 로어북으로 생성!
+    const completedMatches = [...result.matchAll(/COMPLETED:\s*([^|\n]+)\|\s*(\d+)\s*\|\s*(\d+)/gi)];
+    for (const match of completedMatches) {
+        const title = match[1].trim().replace(/^["']|["']$/g, "");
+        let startT = Number(match[2]) || sTurn;
+        const endT = Number(match[3]) || eTurn;
+
+        if (title.toUpperCase() === "NONE") continue;
+
+        // 만약 이전 구간부터 [기록 중]이던 사건이 이번에 끝난 거라면 원래 시작 턴을 유지하고 [기록 중]에서 제거
+        const ongoingIdx = gmData.ongoing_events.findIndex(e =>
+            title.toLowerCase().includes(e.title.toLowerCase()) ||
+            e.title.toLowerCase().includes(title.toLowerCase())
+        );
+        if (ongoingIdx !== -1) {
+            startT = gmData.ongoing_events[ongoingIdx].startTurn;
+            gmData.ongoing_events.splice(ongoingIdx, 1);
+        }
+
+        await summarizeLoreEventRange(title, startT, Math.max(startT, endT));
+    }
+
+    // 2) 이번 구간에서 시작되었으나 아직 끝나지 않은 사건 -> [⏳ 기록 중]에 등록하여 다음 구간으로 토스!
+    const ongoingMatches = [...result.matchAll(/ONGOING:\s*([^|\n]+)\|\s*(\d+)/gi)];
+    for (const match of ongoingMatches) {
+        const title = match[1].trim().replace(/^["']|["']$/g, "");
+        const startT = Number(match[2]) || sTurn;
+
+        if (
+            title.toUpperCase() !== "NONE" &&
+            !gmData.ongoing_events.some(e => e.title.toLowerCase() === title.toLowerCase())
+        ) {
+            gmData.ongoing_events.push({ title, startTurn: startT });
+        }
+    }
+
+    await saveChatConditional();
+    renderLorebookList(gmData);
+}
+
 // 선택 구간 메인 요약
 async function summarizeSelectedRange() {
     if (isSummarizing) return toastr.warning("이미 요약이 진행 중입니다.", "Genius Memory");
@@ -912,7 +982,17 @@ async function runBatchOrAutoSummary(isManualBatch = false) {
 
             const batchIndices = summarizablePool.slice(cursor, cursor + chunkSize);
             await executeSummaryForIndices(batchIndices);
+
+            // 🌟 일괄 요약(또는 자동 요약 시 누락 방지) 시 해당 구간의 사건 로어북도 함께 스캔 및 요약!
+            if (isManualBatch) {
+                await scanAndSummarizeEventsForBatch(batchIndices);
+            }
             cursor += chunkSize;
+        }
+        if (isManualBatch) {
+            // 마지막 보호 버퍼 구간에 걸쳐 있는 진행 중 사건까지 마저 감지
+            await detectEventsOnTurn();
+            toastr.success("밀린 대화 메인 요약 및 사건 로어북 일괄 생성이 모두 완료되었습니다!", "🧠 Genius Memory");
         }
         if (isManualBatch) {
             toastr.success("밀린 대화 일괄 요약이 모두 완료되었습니다!", "🧠 Genius Memory");

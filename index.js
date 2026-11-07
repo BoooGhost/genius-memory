@@ -596,6 +596,31 @@ async function consolidateChunksToMaster(gmData) {
     }
 }
 
+// AI 요약 출력에서 [ACT], [STATE], [OPEN], [ITEMS] 분리
+function parseSummaryOutput(text) {
+    const actMatch = text.match(/\[ACT\]\s*([\s\S]*?)(?=\[STATE\]|\[OPEN\]|\[ITEMS\]|\[KEYS\]|$)/i);
+    const stateMatch = text.match(/\[STATE\]\s*([\s\S]*?)(?=\[OPEN\]|\[ITEMS\]|\[KEYS\]|$)/i);
+    const openMatch = text.match(/\[OPEN\]\s*([\s\S]*?)(?=\[ITEMS\]|\[KEYS\]|$)/i);
+    const itemsMatch = text.match(/\[ITEMS\]\s*([\s\S]*?)(?=\[KEYS\]|$)/i);
+
+    return {
+        act: actMatch ? actMatch[1].trim() : "",
+        state: stateMatch ? stateMatch[1].trim() : "",
+        open: openMatch ? openMatch[1].trim() : "",
+        items: itemsMatch ? itemsMatch[1].trim() : ""
+    };
+}
+
+// 메시지 숨김(유령) 처리 및 해제
+function setMessagesHidden(chat, indices, hidden = true) {
+    for (const i of indices) {
+        if (chat[i]) {
+            chat[i].is_system = hidden;
+            $(`#chat .mes[mesid="${i}"]`).attr("is_system", hidden ? "true" : "false");
+        }
+    }
+}
+
 async function executeSummaryForIndices(indicesToSummarize) {
     const context = getContext();
     const chat = context.chat;

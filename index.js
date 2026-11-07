@@ -235,14 +235,20 @@ function renderMacroChunkSlots(gmData) {
 
     for (let i = 0; i < limit; i++) {
         const chunk = chunks[i];
-        const rangeLabel = chunk ? `(${chunk.range})` : "(비어 있음)";
-        const contentVal = chunk ? chunk.content : "";
+        const hasContent = chunk && chunk.content && chunk.content.trim().length > 0;
+        const rangeLabel = hasContent && chunk.range ? `(${chunk.range})` : "(비어 있음)";
+        const contentVal = hasContent ? chunk.content : "";
+        const clearBtnHtml = hasContent 
+            ? `<span class="gm-clear-chunk-btn" data-idx="${i}" style="cursor:pointer; color:#f87171; font-size:0.9em;" title="이 조각의 내용과 기록된 턴을 완전히 비웁니다.">🗑️ 비우기</span>` 
+            : "";
+
         container.append(`
             <div class="gm-chunk-slot">
                 <div class="gm-chunk-label">
-                    <span>#${i + 1}번째 요약 조각 ${rangeLabel}</span>
+                    <span class="gm-chunk-title-text">#${i + 1}번째 요약 조각 ${rangeLabel}</span>
+                    ${clearBtnHtml}
                 </div>
-                <textarea class="gm-textarea gm-chunk-input" data-idx="${i}" data-range="${chunk?.range || ""}" style="min-height:52px;" placeholder="${i + 1}번째 요약이 이곳에 기록됩니다.">${contentVal}</textarea>
+                <textarea class="gm-textarea gm-chunk-input" data-idx="${i}" data-range="${hasContent ? (chunk.range || "") : ""}" style="min-height:52px;" placeholder="${i + 1}번째 요약이 이곳에 기록됩니다.">${contentVal}</textarea>
             </div>
         `);
     }
@@ -544,18 +550,47 @@ async function autoSaveIfDirty(showToast = true) {
 
     if (isStateDirty) {
         gmData.macro_summary = $("#gm-macro-summary").val();
+        const oldRanges = (gmData.macro_chunks || []).map(c => c.range).filter(Boolean);
         const newChunks = [];
+
         $(".gm-chunk-input").each(function () {
             const val = $(this).val().trim();
             const range = $(this).attr("data-range") || "수동 입력";
-            if (val) newChunks.push({ range, content: val });
+            // 🌟 내용이 있는 칸만 남기고, 비워진 칸은 턴 기록(range)까지 완전히 버림!
+            if (val.length > 0) {
+                newChunks.push({ range, content: val });
+            }
         });
+
+        // 🌟 삭제된 요약 조각이 있다면 해당 턴(예: 51~60턴)의 메시지 숨김 및 점선도 함께 해제!
+        const remainingRanges = new Set(newChunks.map(c => c.range));
+        const context = getContext();
+        for (const oldR of oldRanges) {
+            if (!remainingRanges.has(oldR)) {
+                const m = oldR.match(/(\d+)\s*~\s*(\d+)/);
+                if (m && context?.chat) {
+                    const sIdx = Number(m[1]) - 1;
+                    const eIdx = Number(m[2]) - 1;
+                    const indices = [];
+                    for (let i = sIdx; i <= eIdx; i++) indices.push(i);
+                    setMessagesHidden(context.chat, indices, false);
+                    gmData.dividers = (gmData.dividers || []).filter(d => d.mesId !== eIdx);
+                }
+            }
+        }
+
         gmData.macro_chunks = newChunks;
         gmData.state = $("#gm-state-tracker").val();
         gmData.open = $("#gm-open-tracker").val();
         gmData.items = $("#gm-items-tracker").val();
         isStateDirty = false;
         $("#gm-rollback-state-btn").removeClass("gm-has-unsaved");
+
+        // 🌟 저장 직후 슬롯 UI와 조각 카운터, 채팅창 점선을 즉시 새로고침!
+        const s = extension_settings[extensionName];
+        $("#gm-chunk-counter").text(`(조각: ${gmData.macro_chunks.length}/${s.consolidate_count})`);
+        renderMacroChunkSlots(gmData);
+        renderAllDividers(gmData.dividers);
     }
 
     if (isLoreDirty) {

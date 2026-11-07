@@ -27,12 +27,14 @@ const defaultSettings = {
 };
 
 let isSummarizing = false;
+let isDetectingEvent = false;
+let isDeletingLore = false;
 let selectedStartIdx = null; // 0-based index
 let selectedEndIdx = null;   // 0-based index
-let isStateDirty = false; // 메인 상태창 수정 여부
-let isLoreDirty = false;  // 사건 로어북 수정 여부
+let isStateDirty = false;    // 메인 상태창 수정 여부
+let isLoreDirty = false;     // 사건 로어북 수정 여부
 
-// 🌟 요약 + 상태 추적 + 로어북 키워드 추출 프롬프트
+// 🌟 1. 메인 상태창 요약 프롬프트 (실제 등장인물 이름 강제, 다인 시뮬레이션 지원)
 const SUMMARY_SYSTEM_PROMPT = `Role: Narrative State Analyst. Condense RP context into a dense, high-retention log. Preserve pivotal details while aggressively stripping prose and fluff.
 
 [WHAT TO DROP (Fluff)]
@@ -68,7 +70,15 @@ const SUMMARY_SYSTEM_PROMPT = `Role: Narrative State Analyst. Condense RP contex
 [ITEMS]
 - [Owner Name]: [Notable inventory reflecting acquisitions, uses, or losses]`;
 
-// 🌟 1. 다중 사건(병렬 진행 & 겹침)을 지원하는 초경량 감지기 프롬프트
+// 🌟 2. 5개 조각 누적 시 [통합 전체 요약]으로 합치는 프롬프트
+const CONSOLIDATE_SYSTEM_PROMPT = `Role: Master Narrative Archivist.
+Condense the provided multiple [ACT] logs into a single, cohesive, chronological master summary log.
+- Retain core plot progression, major turning points, key proper nouns, actual character names, and permanent consequences.
+- Merge or drop minor intermediate steps that are already resolved.
+- Keep the telegraphic arrow (->) logbook style.
+- Output in the SAME language as the input logs. Output ONLY the bulleted list without any headers or markdown fences.`;
+
+// 🌟 3. 매 턴 돌아가는 다중/교차 사건 시작·종료 감지기 프롬프트
 const EVENT_DETECTOR_PROMPT = `Role: Multi-Thread Narrative Event Detector.
 In complex RP or multi-character simulations, MULTIPLE events can happen simultaneously or overlap across turns.
 Analyze the recent RP turns and [Currently Ongoing Events].
@@ -80,7 +90,7 @@ Output ONLY using one or more lines in this exact format (in the same language a
 END: [Exact Title from Ongoing Events, or NONE] | [End Turn Number]
 START: [Short Title of new event (2~5 words), or NONE] | [Start Turn Number]`;
 
-// 🌟 사건 로어북 전용: 제스처, 핵심 대사(""), 감정선, 세부 행동을 보존하는 고밀도 정밀 기록 프롬프트
+// 🌟 4. 사건 로어북 전용: 제스처, 핵심 대사(""), 감정선, 세부 행동을 보존하는 정밀 기록 프롬프트
 const LORE_EVENT_SYSTEM_PROMPT = `Role: High-Detail Episodic Memory Archivist.
 Unlike a dry macro summary, this Lorebook entry is recalled ONLY when this specific past event is referenced. Preserve VIVID EPISODIC DETAILS in a compact, structured format so the AI can recall the exact mood, gestures, quotes, and emotions of the scene.
 
@@ -109,14 +119,6 @@ Unlike a dry macro summary, this Lorebook entry is recalled ONLY when this speci
   • [Name] ([Expression/Gesture/Tone]) -> [Specific action or physical detail] : "[Exact memorable quote]" -> [Other character's emotional/behavioral reaction]
   • (Repeat 4–8 detailed chronological beats covering the beginning, climax, and resolution of the scene)
 - [결과/여운]: [How the scene ended, emotional aftermath, relationship shift, or concrete outcome]`;
-
-// 전체 요약 압축용 프롬프트
-const CONSOLIDATE_SYSTEM_PROMPT = `Role: Master Narrative Archivist.
-Condense the provided multiple [ACT] logs into a single, cohesive, chronological master summary log.
-- Retain core plot progression, major turning points, key proper nouns, and permanent consequences.
-- Merge or drop minor intermediate steps that are already resolved.
-- Keep the telegraphic arrow (->) logbook style.
-- Output in the SAME language as the input logs. Output ONLY the bulleted list without any headers or markdown fences.`;
 
 // 설정 불러오기
 function loadSettings() {
@@ -147,7 +149,7 @@ function getChatGMData() {
     if (!context.chatMetadata.genius_memory) {
         context.chatMetadata.genius_memory = {
             macro_summary: "",
-            macro_chunks: [], // 🌟 [{ range: "1~10턴", content: "..." }, ...] 최대 5개 보관 후 통합
+            macro_chunks: [],
             state: "",
             open: "",
             items: "",
@@ -157,14 +159,18 @@ function getChatGMData() {
         };
     }
     const gm = context.chatMetadata.genius_memory;
-    gm.dividers = gm.dividers || [];
-    gm.micro_events = gm.micro_events || [];
+    gm.macro_summary = gm.macro_summary || "";
     gm.macro_chunks = gm.macro_chunks || [];
+    gm.state = gm.state || "";
+    gm.open = gm.open || "";
+    gm.items = gm.items || "";
+    gm.dividers = gm.dividers || [];
     gm.ongoing_events = gm.ongoing_events || [];
+    gm.micro_events = gm.micro_events || [];
     return gm;
 }
 
-// 🌟 각 메시지의 점 3개(...) 메뉴 안에 '<' 칸과 '>' 칸을 따로따로 주입
+// 각 메시지의 점 3개(...) 메뉴 안에 '<' 칸과 '>' 칸 주입
 function injectSceneButtons() {
     $("#chat .mes").each(function () {
         if ($(this).find(".gm-scene-btn").length > 0) return;
@@ -182,7 +188,7 @@ function injectSceneButtons() {
     });
 }
 
-// 선택한 구간 하이라이트 및 입력창 동기화
+// 선택한 구간 하이라이트 및 책갈피/입력창 동기화
 function updateRangeHighlight() {
     $("#chat .mes").removeClass("gm-range-start gm-range-end gm-in-range");
 
@@ -204,14 +210,6 @@ function updateRangeHighlight() {
         for (let i = selectedStartIdx; i <= selectedEndIdx; i++) {
             $(`#chat .mes[mesid="${i}"]`).addClass("gm-in-range");
         }
-        $("#gm-range-sum-btn").text(`🎯 ${selectedStartIdx + 1}~${selectedEndIdx + 1}턴 요약`);
-    } else {
-        $("#gm-range-sum-btn").text(`🎯 선택 구간 요약`);
-    }
-    if (selectedStartIdx !== null && selectedEndIdx !== null && selectedStartIdx <= selectedEndIdx) {
-        for (let i = selectedStartIdx; i <= selectedEndIdx; i++) {
-            $(`#chat .mes[mesid="${i}"]`).addClass("gm-in-range");
-        }
         $("#gm-range-sum-btn").text(`🎯 ${selectedStartIdx + 1}~${selectedEndIdx + 1}턴 메인요약`);
         $("#gm-bookmark-text").text(`🎬 ${selectedStartIdx + 1}~${selectedEndIdx + 1}턴 메뉴`);
     } else {
@@ -226,10 +224,12 @@ function clearRangeSelection() {
     updateRangeHighlight();
 }
 
-// UI 및 프롬프트 전체 새로고침
+// 1~5번째 요약 조각 슬롯 렌더링
 function renderMacroChunkSlots(gmData) {
     const container = $("#gm-chunk-slots-container");
+    if (container.length === 0) return;
     container.empty();
+
     const limit = Number(extension_settings[extensionName].consolidate_count) || 5;
     const chunks = gmData?.macro_chunks || [];
 
@@ -246,121 +246,6 @@ function renderMacroChunkSlots(gmData) {
             </div>
         `);
     }
-}
-
-// 🌟 플레이어가 수정한 내용이 있으면 닫거나 다음 인풋 전송 시 자동 저장!
-async function autoSaveIfDirty(showToast = true) {
-    if (!isStateDirty && !isLoreDirty) return;
-    const gmData = getChatGMData();
-    if (!gmData) return;
-
-    if (isStateDirty) {
-        gmData.macro_summary = $("#gm-macro-summary").val();
-        const newChunks = [];
-        $(".gm-chunk-input").each(function () {
-            const val = $(this).val().trim();
-            const range = $(this).attr("data-range") || "수동 입력";
-            if (val) newChunks.push({ range, content: val });
-        });
-        gmData.macro_chunks = newChunks;
-        gmData.state = $("#gm-state-tracker").val();
-        gmData.open = $("#gm-open-tracker").val();
-        gmData.items = $("#gm-items-tracker").val();
-        isStateDirty = false;
-        $("#gm-rollback-state-btn").removeClass("gm-has-unsaved");
-    }
-
-    if (isLoreDirty) {
-        const cards = $(".gm-lore-card");
-        for (let i = 0; i < cards.length; i++) {
-            const card = $(cards[i]);
-            const idx = Number(card.attr("data-idx"));
-            if (!gmData.micro_events[idx]) continue;
-            const keysStr = card.find(".gm-lore-keys").val() || "";
-            const titleStr = card.find(".gm-lore-title").val() || "";
-            gmData.micro_events[idx].title = titleStr.trim();
-            const contentStr = card.find(".gm-lore-content").val() || "";
-
-            gmData.micro_events[idx].keys = keysStr.split(",").map(k => k.trim()).filter(Boolean);
-            gmData.micro_events[idx].content = contentStr.trim();
-            gmData.micro_events[idx].vector = await computeVector(`${keysStr} ${contentStr}`);
-        }
-        isLoreDirty = false;
-        $("#gm-rollback-lore-btn").removeClass("gm-has-unsaved");
-    }
-
-    await saveChatConditional();
-    await updatePromptInjection(gmData);
-    if (showToast) {
-        toastr.success("수정한 기억이 자동 저장되었습니다.", "🧠 Genius Memory", { timeOut: 1500 });
-    }
-}
-
-async function refreshUIAndPrompt() {
-    const gmData = getChatGMData();
-    const s = extension_settings[extensionName];
-
-    injectSceneButtons();
-
-    if (!gmData) {
-        $("#gm-macro-summary, #gm-state-tracker, #gm-open-tracker, #gm-items-tracker").val("");
-        $("#gm-chunk-counter").text(`(조각: 0/${s.consolidate_count})`);
-        $("#gm-chunk-slots-container, #gm-lore-list").empty();
-        $("#gm-lore-count").text("(0)");
-        setExtensionPrompt(PROMPT_KEY, "", extension_prompt_types.BEFORE_PROMPT, 0);
-        return;
-    }
-
-    $("#gm-macro-summary").val(gmData.macro_summary);
-    $("#gm-state-tracker").val(gmData.state);
-    $("#gm-open-tracker").val(gmData.open);
-    $("#gm-items-tracker").val(gmData.items);
-    $("#gm-chunk-counter").text(`(조각: ${gmData.macro_chunks.length}/${s.consolidate_count})`);
-
-    renderMacroChunkSlots(gmData);
-    renderAllDividers(gmData.dividers);
-    await updatePromptInjection(gmData);
-}
-
-async function updatePromptInjection(gmData) {
-    if (!extension_settings[extensionName].enabled || !gmData) {
-        if (gmData) renderLorebookList(gmData);
-        setExtensionPrompt(PROMPT_KEY, "", extension_prompt_types.BEFORE_PROMPT, 0);
-        return;
-    }
-
-    const recalledEvents = await retrieveRelevantEvents(gmData);
-    renderLorebookList(gmData);
-
-    let parts = [];
-    // 통합 전체 요약 + 현재 쌓여있는 1~5 조각들을 합쳐서 주입
-    let fullMacro = [];
-    if (gmData.macro_summary.trim()) fullMacro.push(gmData.macro_summary.trim());
-    for (const c of (gmData.macro_chunks || [])) {
-        if (c.content && c.content.trim()) fullMacro.push(`[Turns ${c.range}]\n${c.content.trim()}`);
-    }
-    if (fullMacro.length > 0) {
-        parts.push(`[Story Summary So Far]\n${fullMacro.join("\n\n")}`);
-    }
-
-    if (recalledEvents.length > 0) {
-        const recalledText = recalledEvents
-            .map(ev => `• [Turns ${ev.startTurn}~${ev.endTurn} | Keys: ${(ev.keys || []).join(", ")}]\n${ev.content}`)
-            .join("\n\n");
-        parts.push(`[Recalled Detailed Past Events (Lorebook & Vector RAG)]\n${recalledText}`);
-    }
-
-    if (gmData.state.trim()) parts.push(`[Current Character & Relationship State]\n${gmData.state.trim()}`);
-    if (gmData.open.trim()) parts.push(`[Active Promises & Unresolved Plots]\n${gmData.open.trim()}`);
-    if (gmData.items.trim()) parts.push(`[Current Inventory]\n${gmData.items.trim()}`);
-
-    if (parts.length === 0) {
-        setExtensionPrompt(PROMPT_KEY, "", extension_prompt_types.BEFORE_PROMPT, 0);
-        return;
-    }
-
-    const finalPrompt = `<genius_memory_context>\n${parts.join("\n\n")}\n</genius_memory_context>`;
-    setExtensionPrompt(PROMPT_KEY, finalPrompt, extension_prompt_types.BEFORE_PROMPT, 0);
 }
 
 // 채팅창에 [요약됨] 하얀 점선 표시
@@ -413,7 +298,7 @@ async function callSubAPI(systemPrompt, userText) {
     return data.choices?.[0]?.message?.content || "";
 }
 
-// 🌟 1. 텍스트 벡터화 (API 임베딩 또는 내장 256차원 로컬 바이그램 벡터)
+// 텍스트 벡터화 (API 임베딩 또는 내장 256차원 로컬 바이그램 벡터)
 async function computeVector(text) {
     const s = extension_settings[extensionName];
     const clean = (text || "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").trim();
@@ -455,7 +340,7 @@ async function computeVector(text) {
     return vec.map(v => Number((v / norm).toFixed(4)));
 }
 
-// 🌟 2. 코사인 유사도 계산
+// 코사인 유사도 계산
 function cosineSimilarity(vecA, vecB) {
     if (!vecA || !vecB || vecA.length !== vecB.length || vecA.length === 0) return 0;
     let dot = 0, normA = 0, normB = 0;
@@ -467,7 +352,7 @@ function cosineSimilarity(vecA, vecB) {
     return (normA && normB) ? (dot / (Math.sqrt(normA) * Math.sqrt(normB))) : 0;
 }
 
-// 🌟 3. 로어북 키워드 + 벡터 유사도 하이브리드 검색
+// 로어북 키워드 + 벡터 유사도 하이브리드 검색
 async function retrieveRelevantEvents(gmData) {
     const events = gmData?.micro_events || [];
     if (events.length === 0) return [];
@@ -485,13 +370,17 @@ async function retrieveRelevantEvents(gmData) {
         const ev = events[idx];
         ev.keys = Array.isArray(ev.keys) ? ev.keys : [];
         if (!ev.vector || ev.vector.length === 0) {
-            ev.vector = await computeVector(`${ev.keys.join(" ")} ${ev.content || ""}`);
+            ev.vector = await computeVector(`${ev.title || ""} ${ev.keys.join(" ")} ${ev.content || ""}`);
         }
 
         let matchedKeys = 0;
         for (const k of ev.keys) {
             if (k && recentText.includes(k.toLowerCase())) matchedKeys++;
         }
+        if (ev.title && recentText.includes(ev.title.toLowerCase())) {
+            matchedKeys++;
+        }
+
         const keywordBonus = matchedKeys > 0 ? Math.min(0.6, matchedKeys * 0.25) : 0;
         const vecScore = cosineSimilarity(queryVec, ev.vector);
         const totalScore = Number((vecScore + keywordBonus).toFixed(3));
@@ -510,9 +399,9 @@ async function retrieveRelevantEvents(gmData) {
     return selected.sort((a, b) => a.idx - b.idx).map(item => item.ev);
 }
 
-// 🌟 4. 사이드바 [사건 로어북] 탭 렌더링
+// 사이드바 [사건 로어북] 탭 ([기록 중] + [완료]) 렌더링
 function renderLorebookList(gmData) {
-    // 1. [⏳ 기록 중] 사건 렌더링
+    // 1. [⏳ 기록 중] 진행 사건 렌더링
     const ongoingEl = $("#gm-ongoing-list");
     if (ongoingEl.length > 0) {
         ongoingEl.empty();
@@ -529,7 +418,7 @@ function renderLorebookList(gmData) {
                         </div>
                         <div class="gm-ongoing-actions">
                             <span class="gm-finish-event-btn" data-idx="${idx}" title="지금 턴을 끝으로 이 사건을 요약하여 완료 로어북으로 넘깁니다.">✅ 지금 완료</span>
-                            <span class="gm-ongoing-del gm-lore-del" data-idx="${idx}" title="취소/삭제"><i class="fa-solid fa-xmark"></i></span>
+                            <span class="gm-ongoing-del" data-idx="${idx}" style="cursor:pointer; color:#f87171; padding:0 4px;" title="진행 취소/삭제"><i class="fa-solid fa-xmark"></i></span>
                         </div>
                     </div>
                 `);
@@ -537,7 +426,7 @@ function renderLorebookList(gmData) {
         }
     }
 
-    // 2. [✅ 완료된 사건] 렌더링
+    // 2. [✅ 완료된 사건] 로어북 렌더링
     const listEl = $("#gm-lore-list");
     if (listEl.length === 0) return;
     listEl.empty();
@@ -570,7 +459,7 @@ function renderLorebookList(gmData) {
                 </div>
                 <div class="gm-fold-body">
                     <input type="text" class="gm-lore-title gm-lore-keys" style="color:#93c5fd !important; margin-bottom:2px;" value="${(ev.title || "").replace(/"/g, '&quot;')}" placeholder="사건 제목 (예: 점심 식사)" />
-                    <input type="text" class="gm-lore-keys" value="${keysStr.replace(/"/g, '&quot;')}" placeholder="로어북 호출 키워드 (쉼표로 구분)" />
+                    <input type="text" class="gm-lore-keys gm-lore-keys-only" value="${keysStr.replace(/"/g, '&quot;')}" placeholder="로어북 호출 키워드 (쉼표로 구분)" />
                     <textarea class="gm-lore-content gm-textarea" placeholder="상세 사건 기록...">${ev.content || ""}</textarea>
                 </div>
             </div>
@@ -579,24 +468,124 @@ function renderLorebookList(gmData) {
     });
 }
 
-// 쌓인 조각들을 통합 전체 요약으로 합치는 함수
-async function consolidateChunksToMaster(gmData) {
-    if (!gmData.macro_chunks || gmData.macro_chunks.length === 0) return;
-    toastr.info(`요약 조각 ${gmData.macro_chunks.length}개를 [통합 전체 요약]으로 합치는 중...`, "🧠 Genius Memory");
+// 프롬프트 주입 (통합 요약 + 1~5 조각 + 로어북/벡터 검색된 과거 사건 + 상태창)
+async function updatePromptInjection(gmData) {
+    if (!extension_settings[extensionName].enabled || !gmData) {
+        if (gmData) renderLorebookList(gmData);
+        setExtensionPrompt(PROMPT_KEY, "", extension_prompt_types.BEFORE_PROMPT, 0);
+        return;
+    }
 
-    const combinedInput = [
-        gmData.macro_summary ? `[Prior Master Summary]\n${gmData.macro_summary}` : "",
-        ...gmData.macro_chunks.map((c, i) => `[Chunk #${i + 1} (${c.range})]\n${c.content}`)
-    ].filter(Boolean).join("\n\n");
+    const recalledEvents = await retrieveRelevantEvents(gmData);
+    renderLorebookList(gmData);
 
-    const consolidated = await callSubAPI(CONSOLIDATE_SYSTEM_PROMPT, combinedInput);
-    if (consolidated.trim()) {
-        gmData.macro_summary = consolidated.trim();
-        gmData.macro_chunks = []; // 통합 완료 후 1~5번 조각 슬롯 비우기!
+    let parts = [];
+    let fullMacro = [];
+    if (gmData.macro_summary.trim()) fullMacro.push(gmData.macro_summary.trim());
+    for (const c of (gmData.macro_chunks || [])) {
+        if (c.content && c.content.trim()) fullMacro.push(`[Turns ${c.range}]\n${c.content.trim()}`);
+    }
+    if (fullMacro.length > 0) {
+        parts.push(`[Story Summary So Far]\n${fullMacro.join("\n\n")}`);
+    }
+
+    if (recalledEvents.length > 0) {
+        const recalledText = recalledEvents
+            .map(ev => `• [${ev.title || "Event"} | Turns ${ev.startTurn}~${ev.endTurn} | Keys: ${(ev.keys || []).join(", ")}]\n${ev.content}`)
+            .join("\n\n");
+        parts.push(`[Recalled Detailed Past Events (Lorebook & Vector RAG)]\n${recalledText}`);
+    }
+
+    if (gmData.state.trim()) parts.push(`[Current Character & Relationship State]\n${gmData.state.trim()}`);
+    if (gmData.open.trim()) parts.push(`[Active Promises & Unresolved Plots]\n${gmData.open.trim()}`);
+    if (gmData.items.trim()) parts.push(`[Current Inventory]\n${gmData.items.trim()}`);
+
+    if (parts.length === 0) {
+        setExtensionPrompt(PROMPT_KEY, "", extension_prompt_types.BEFORE_PROMPT, 0);
+        return;
+    }
+
+    const finalPrompt = `<genius_memory_context>\n${parts.join("\n\n")}\n</genius_memory_context>`;
+    setExtensionPrompt(PROMPT_KEY, finalPrompt, extension_prompt_types.BEFORE_PROMPT, 0);
+}
+
+// UI 및 프롬프트 전체 새로고침
+async function refreshUIAndPrompt() {
+    const gmData = getChatGMData();
+    const s = extension_settings[extensionName];
+
+    injectSceneButtons();
+
+    if (!gmData) {
+        $("#gm-macro-summary, #gm-state-tracker, #gm-open-tracker, #gm-items-tracker").val("");
+        $("#gm-chunk-counter").text(`(조각: 0/${s.consolidate_count})`);
+        $("#gm-chunk-slots-container, #gm-ongoing-list, #gm-lore-list").empty();
+        $("#gm-lore-count").text("(0)");
+        setExtensionPrompt(PROMPT_KEY, "", extension_prompt_types.BEFORE_PROMPT, 0);
+        return;
+    }
+
+    $("#gm-macro-summary").val(gmData.macro_summary);
+    $("#gm-state-tracker").val(gmData.state);
+    $("#gm-open-tracker").val(gmData.open);
+    $("#gm-items-tracker").val(gmData.items);
+    $("#gm-chunk-counter").text(`(조각: ${gmData.macro_chunks.length}/${s.consolidate_count})`);
+
+    renderMacroChunkSlots(gmData);
+    renderAllDividers(gmData.dividers);
+    await updatePromptInjection(gmData);
+}
+
+// 플레이어가 수정한 내용이 있으면 창을 닫거나 다음 인풋 전송 시 자동 저장
+async function autoSaveIfDirty(showToast = true) {
+    if (!isStateDirty && !isLoreDirty) return;
+    const gmData = getChatGMData();
+    if (!gmData) return;
+
+    if (isStateDirty) {
+        gmData.macro_summary = $("#gm-macro-summary").val();
+        const newChunks = [];
+        $(".gm-chunk-input").each(function () {
+            const val = $(this).val().trim();
+            const range = $(this).attr("data-range") || "수동 입력";
+            if (val) newChunks.push({ range, content: val });
+        });
+        gmData.macro_chunks = newChunks;
+        gmData.state = $("#gm-state-tracker").val();
+        gmData.open = $("#gm-open-tracker").val();
+        gmData.items = $("#gm-items-tracker").val();
+        isStateDirty = false;
+        $("#gm-rollback-state-btn").removeClass("gm-has-unsaved");
+    }
+
+    if (isLoreDirty) {
+        const cards = $(".gm-lore-card");
+        for (let i = 0; i < cards.length; i++) {
+            const card = $(cards[i]);
+            const idx = Number(card.attr("data-idx"));
+            if (!gmData.micro_events[idx]) continue;
+
+            const titleStr = card.find(".gm-lore-title").val() || "";
+            const keysStr = card.find(".gm-lore-keys-only").val() || "";
+            const contentStr = card.find(".gm-lore-content").val() || "";
+
+            gmData.micro_events[idx].title = titleStr.trim();
+            gmData.micro_events[idx].keys = keysStr.split(",").map(k => k.trim()).filter(Boolean);
+            gmData.micro_events[idx].content = contentStr.trim();
+            gmData.micro_events[idx].vector = await computeVector(`${titleStr} ${keysStr} ${contentStr}`);
+        }
+        isLoreDirty = false;
+        $("#gm-rollback-lore-btn").removeClass("gm-has-unsaved");
+    }
+
+    await saveChatConditional();
+    await updatePromptInjection(gmData);
+    if (showToast) {
+        toastr.success("수정한 기억이 자동 저장되었습니다.", "🧠 Genius Memory", { timeOut: 1500 });
     }
 }
 
-// AI 요약 출력에서 [ACT], [STATE], [OPEN], [ITEMS] 분리
+// AI 메인 요약 출력 파싱
 function parseSummaryOutput(text) {
     const actMatch = text.match(/\[ACT\]\s*([\s\S]*?)(?=\[STATE\]|\[OPEN\]|\[ITEMS\]|\[KEYS\]|$)/i);
     const stateMatch = text.match(/\[STATE\]\s*([\s\S]*?)(?=\[OPEN\]|\[ITEMS\]|\[KEYS\]|$)/i);
@@ -621,6 +610,24 @@ function setMessagesHidden(chat, indices, hidden = true) {
     }
 }
 
+// 쌓인 조각들을 [통합 전체 요약]으로 압축 후 슬롯 비우기
+async function consolidateChunksToMaster(gmData) {
+    if (!gmData.macro_chunks || gmData.macro_chunks.length === 0) return;
+    toastr.info(`요약 조각 ${gmData.macro_chunks.length}개를 [통합 전체 요약]으로 합치는 중...`, "🧠 Genius Memory");
+
+    const combinedInput = [
+        gmData.macro_summary ? `[Prior Master Summary]\n${gmData.macro_summary}` : "",
+        ...gmData.macro_chunks.map((c, i) => `[Chunk #${i + 1} (${c.range})]\n${c.content}`)
+    ].filter(Boolean).join("\n\n");
+
+    const consolidated = await callSubAPI(CONSOLIDATE_SYSTEM_PROMPT, combinedInput);
+    if (consolidated.trim()) {
+        gmData.macro_summary = consolidated.trim();
+        gmData.macro_chunks = [];
+    }
+}
+
+// 지정된 메시지 인덱스 배열을 메인 상태창으로 요약 실행
 async function executeSummaryForIndices(indicesToSummarize) {
     const context = getContext();
     const chat = context.chat;
@@ -631,7 +638,7 @@ async function executeSummaryForIndices(indicesToSummarize) {
     const endIdx = indicesToSummarize[indicesToSummarize.length - 1];
     const rangeStr = `${startIdx + 1}~${endIdx + 1}턴`;
 
-    toastr.info(`${rangeStr} 대화 요약을 진행합니다...`, "🧠 Genius Memory");
+    toastr.info(`${rangeStr} 메인 상태창 요약을 진행합니다...`, "🧠 Genius Memory");
 
     const userName = context.name1 || "User";
     const charName = context.name2 || "Character";
@@ -670,22 +677,11 @@ ${dialogueLines}`;
             range: rangeStr,
             content: parsed.act
         });
-
-        // ❌ 아래 부분을 지워주세요 (사건 로어북은 이제 전용 함수가 따로 기록합니다!)
-        const eventVector = await computeVector(`${parsed.keys.join(" ")} ${parsed.act}`);
-        gmData.micro_events.push({
-            startTurn: startIdx + 1,
-            endTurn: endIdx + 1,
-            keys: parsed.keys,
-            content: parsed.act,
-            vector: eventVector
-        });
     }
     if (parsed.state) gmData.state = parsed.state;
     if (parsed.open) gmData.open = parsed.open;
     if (parsed.items) gmData.items = parsed.items;
 
-    // 5개 조각이 다 찼으면 마스터 요약으로 통합 후 비우기!
     const consolidateLimit = Number(s.consolidate_count) || 5;
     if (gmData.macro_chunks.length >= consolidateLimit) {
         await consolidateChunksToMaster(gmData);
@@ -704,7 +700,7 @@ ${dialogueLines}`;
     await refreshUIAndPrompt();
 }
 
-// 🌟 1. 특정 턴 구간(startTurn ~ endTurn)을 프롬프트 숨김 여부와 상관없이 긁어와 [완료된 사건 로어북]으로 기록!
+// 특정 턴 구간(startTurn ~ endTurn)을 숨김 여부와 상관없이 긁어와 [완료된 사건 로어북]으로 정밀 기록
 async function summarizeLoreEventRange(eventTitle, startTurn, endTurn) {
     const context = getContext();
     const chat = context?.chat;
@@ -715,9 +711,8 @@ async function summarizeLoreEventRange(eventTitle, startTurn, endTurn) {
     const eIdx = Math.min(chat.length - 1, Number(endTurn) - 1);
     if (sIdx > eIdx) return;
 
-    toastr.info(`📚 사건 [${eventTitle || "선택 구간"}] (${sIdx + 1}~${eIdx + 1}턴) 로어북 기록을 생성합니다...`, "🧠 Genius Memory");
+    toastr.info(`📚 사건 [${eventTitle || "선택 구간"}] (${sIdx + 1}~${eIdx + 1}턴) 정밀 로어북을 생성합니다...`, "🧠 Genius Memory");
 
-    // 숨김(is_system) 여부와 무관하게 모든 해당 턴의 대사를 수집!
     const lines = [];
     for (let i = sIdx; i <= eIdx; i++) {
         if (chat[i] && !chat[i].extra?.isSmallSys) {
@@ -753,8 +748,7 @@ async function summarizeLoreEventRange(eventTitle, startTurn, endTurn) {
     toastr.success(`✅ 사건 [${finalTitle}] (${sIdx + 1}~${eIdx + 1}턴) 로어북 기록 완료!`, "🧠 Genius Memory");
 }
 
-// 🌟 2. 매 턴 가볍게 돌아가는 사건 시작/종료 감지기
-let isDetectingEvent = false;
+// 매 턴 돌아가는 다중/교차 사건 시작·종료 감지기
 async function detectEventsOnTurn() {
     const s = extension_settings[extensionName];
     if (!s.enabled || !s.auto_detect_events || isDetectingEvent) return;
@@ -782,14 +776,13 @@ async function detectEventsOnTurn() {
 
         let changed = false;
 
-        // 🌟 1) 여러 사건이 동시에 끝났어도 모두 감지 (matchAll)
+        // 1) 종료된 사건 감지 (다중 종료 지원)
         const endMatches = [...result.matchAll(/END:\s*([^|\n]+)\|\s*(\d+)/gi)];
         for (const match of endMatches) {
             const endedTitle = match[1].trim().replace(/^["']|["']$/g, "");
             const endTurnNum = Number(match[2]) || totalTurns;
 
             if (endedTitle.toUpperCase() !== "NONE" && gmData.ongoing_events.length > 0) {
-                // 정확히 이름이 일치하거나 포함되는 사건만 찾기 (엉뚱한 사건 강제 종료 방지!)
                 const targetIdx = gmData.ongoing_events.findIndex(e => 
                     endedTitle.toLowerCase().includes(e.title.toLowerCase()) || 
                     e.title.toLowerCase().includes(endedTitle.toLowerCase())
@@ -806,7 +799,7 @@ async function detectEventsOnTurn() {
             }
         }
 
-        // 🌟 2) 기존 사건이 진행 중이더라도 새로운 사건(또는 다중 사건)이 시작되면 동시에 [기록 중]에 추가!
+        // 2) 새로운 사건 시작 감지 (다중 시작 & 병렬 진행 지원)
         const startMatches = [...result.matchAll(/START:\s*([^|\n]+)\|\s*(\d+)/gi)];
         for (const match of startMatches) {
             const newTitle = match[1].trim().replace(/^["']|["']$/g, "");
@@ -836,71 +829,7 @@ async function detectEventsOnTurn() {
     }
 }
 
-$("#gm_auto_detect_events").on("change", function () {
-        extension_settings[extensionName].auto_detect_events = $(this).prop("checked");
-        saveSettingsDebounced();
-    });
-
-    // 🌟 선택한 구간(<, >)을 사건 로어북으로 즉시 요약
-    $("#gm-range-lore-btn").on("click", async function () {
-        $("#gm-drawer-layer").removeClass("gm-open");
-        const startTurnVal = Number($("#gm-start-turn").val());
-        const endTurnVal = Number($("#gm-end-turn").val());
-        if (!startTurnVal || !endTurnVal || startTurnVal > endTurnVal) {
-            return toastr.warning("올바른 시작~끝 턴을 먼저 지정해주세요.", "Genius Memory");
-        }
-        const customTitle = prompt("이 구간의 사건 제목을 입력해주세요 (비워두면 AI가 자동 작성):", "");
-        if (customTitle === null) return;
-        await summarizeLoreEventRange(customTitle.trim(), startTurnVal, endTurnVal);
-        clearRangeSelection();
-    });
-
-    // 🌟 [기록 중] 사건을 수동으로 걸어두기
-    $("#gm-add-ongoing-btn").on("click", async function () {
-        const gmData = getChatGMData();
-        const context = getContext();
-        if (!gmData || !context?.chat) return;
-        const defaultTurn = context.chat.length || 1;
-        const title = prompt("현재 시작된 사건의 이름을 입력하세요 (예: 점심 식사):", "");
-        if (!title) return;
-        const turnInput = prompt(`몇 번째 턴부터 시작되었나요? (현재 마지막 턴: ${defaultTurn})`, String(defaultTurn));
-        const sTurn = Number(turnInput) || defaultTurn;
-
-        gmData.ongoing_events.push({ title: title.trim(), startTurn: sTurn });
-        await saveChatConditional();
-        renderLorebookList(gmData);
-    });
-
-    // 🌟 [기록 중] 사건의 [✅ 지금 완료] 버튼 클릭 시 -> 시작 턴부터 현재 마지막 턴까지 요약 후 완료로 이관!
-    $(document).on("click", ".gm-finish-event-btn", async function (e) {
-        e.stopPropagation();
-        const idx = Number($(this).attr("data-idx"));
-        const gmData = getChatGMData();
-        const context = getContext();
-        if (!gmData || !context?.chat) return;
-
-        const targetEvent = gmData.ongoing_events[idx];
-        if (!targetEvent) return;
-        const currentLastTurn = context.chat.length;
-        const endTurn = Math.max(targetEvent.startTurn, currentLastTurn);
-
-        gmData.ongoing_events.splice(idx, 1);
-        renderLorebookList(gmData);
-        await summarizeLoreEventRange(targetEvent.title, targetEvent.startTurn, endTurn);
-    });
-
-    // [기록 중] 사건 취소(X) 버튼
-    $(document).on("click", ".gm-ongoing-del", async function (e) {
-        e.stopPropagation();
-        const idx = Number($(this).attr("data-idx"));
-        const gmData = getChatGMData();
-        if (!gmData) return;
-        gmData.ongoing_events.splice(idx, 1);
-        await saveChatConditional();
-        renderLorebookList(gmData);
-    });
-
-// 선택 구간 요약
+// 선택 구간 메인 요약
 async function summarizeSelectedRange() {
     if (isSummarizing) return toastr.warning("이미 요약이 진행 중입니다.", "Genius Memory");
 
@@ -927,11 +856,11 @@ async function summarizeSelectedRange() {
 
     if (indices.length === 0) return toastr.warning("선택한 구간에 요약할 메시지가 없습니다.", "Genius Memory");
 
+    $(".gm-drawer-layer").removeClass("gm-open");
     isSummarizing = true;
     try {
-        $("#gm-drawer-layer").removeClass("gm-open");
         await executeSummaryForIndices(indices);
-        toastr.success(`${startIdx + 1} ~ ${endIdx + 1}턴 선택 구간 요약 완료!`, "🧠 Genius Memory");
+        toastr.success(`${startIdx + 1} ~ ${endIdx + 1}턴 선택 구간 메인 요약 완료!`, "🧠 Genius Memory");
         clearRangeSelection();
     } catch (error) {
         console.error("[Genius Memory] 구간 요약 오류:", error);
@@ -973,6 +902,7 @@ async function runBatchOrAutoSummary(isManualBatch = false) {
         return toastr.info(`보호 버퍼(최근 ${bufferSize}턴)를 제외하면 요약할 밀린 대화가 없습니다.`, "Genius Memory");
     }
 
+    if (isManualBatch) $(".gm-drawer-layer").removeClass("gm-open");
     isSummarizing = true;
     try {
         let cursor = 0;
@@ -1036,73 +966,20 @@ function setupListeners() {
         extension_settings[extensionName].embed_model = $(this).val().trim();
         saveSettingsDebounced();
     });
-
-    $("#gm-close-btn").on("click", async function () {
-        $("#gm-sidebar").removeClass("gm-open");
-        await autoSaveIfDirty(true);
-    });
-
     $("#gm_auto_detect_events").on("change", function () {
         extension_settings[extensionName].auto_detect_events = $(this).prop("checked");
         saveSettingsDebounced();
     });
 
-    // 🌟 선택한 구간(<, >)을 사건 로어북으로 즉시 요약
-    $("#gm-range-lore-btn").on("click", async function () {
-        const startTurnVal = Number($("#gm-start-turn").val());
-        const endTurnVal = Number($("#gm-end-turn").val());
-        if (!startTurnVal || !endTurnVal || startTurnVal > endTurnVal) {
-            return toastr.warning("올바른 시작~끝 턴을 먼저 지정해주세요.", "Genius Memory");
-        }
-        const customTitle = prompt("이 구간의 사건 제목을 입력해주세요 (비워두면 AI가 자동 작성):", "");
-        if (customTitle === null) return;
-        await summarizeLoreEventRange(customTitle.trim(), startTurnVal, endTurnVal);
-        clearRangeSelection();
+    // 사이드바 닫기 시 자동 저장
+    $("#gm-close-btn").on("click", async function () {
+        $("#gm-sidebar").removeClass("gm-open");
+        await autoSaveIfDirty(true);
     });
 
-    // 🌟 [기록 중] 사건을 수동으로 걸어두기
-    $("#gm-add-ongoing-btn").on("click", async function () {
-        const gmData = getChatGMData();
-        const context = getContext();
-        if (!gmData || !context?.chat) return;
-        const defaultTurn = context.chat.length || 1;
-        const title = prompt("현재 시작된 사건의 이름을 입력하세요 (예: 점심 식사):", "");
-        if (!title) return;
-        const turnInput = prompt(`몇 번째 턴부터 시작되었나요? (현재 마지막 턴: ${defaultTurn})`, String(defaultTurn));
-        const sTurn = Number(turnInput) || defaultTurn;
-
-        gmData.ongoing_events.push({ title: title.trim(), startTurn: sTurn });
-        await saveChatConditional();
-        renderLorebookList(gmData);
-    });
-
-    // 🌟 [기록 중] 사건의 [✅ 지금 완료] 버튼 클릭 시 -> 시작 턴부터 현재 마지막 턴까지 요약 후 완료로 이관!
-    $(document).on("click", ".gm-finish-event-btn", async function (e) {
-        e.stopPropagation();
-        const idx = Number($(this).attr("data-idx"));
-        const gmData = getChatGMData();
-        const context = getContext();
-        if (!gmData || !context?.chat) return;
-
-        const targetEvent = gmData.ongoing_events[idx];
-        if (!targetEvent) return;
-        const currentLastTurn = context.chat.length;
-        const endTurn = Math.max(targetEvent.startTurn, currentLastTurn);
-
-        gmData.ongoing_events.splice(idx, 1);
-        renderLorebookList(gmData);
-        await summarizeLoreEventRange(targetEvent.title, targetEvent.startTurn, endTurn);
-    });
-
-    // [기록 중] 사건 취소(X) 버튼
-    $(document).on("click", ".gm-ongoing-del", async function (e) {
-        e.stopPropagation();
-        const idx = Number($(this).attr("data-idx"));
-        const gmData = getChatGMData();
-        if (!gmData) return;
-        gmData.ongoing_events.splice(idx, 1);
-        await saveChatConditional();
-        renderLorebookList(gmData);
+    // 책갈피 버튼 클릭 시 요약 컨트롤 팝업 열기/닫기
+    $(document).on("click", "#gm-bookmark-btn", function () {
+        $(".gm-drawer-layer").toggleClass("gm-open");
     });
 
     // 사이드바 탭 전환 (메인 상태창 <-> 사건 로어북)
@@ -1113,14 +990,14 @@ function setupListeners() {
         $(`#${$(this).attr("data-tab")}`).addClass("active");
     });
 
-    // 🌟 책갈피 버튼 클릭 시 요약 컨트롤 팝업 열기/닫기
-    $("#gm-bookmark-btn").on("click", function () {
-        $("#gm-drawer-layer").toggleClass("gm-open");
+    // 아코디언 토글 (헤더 클릭 시 접기/펼치기)
+    $(document).on("click", ".gm-fold-header", function (e) {
+        if ($(e.target).closest(".gm-lore-del, button").length > 0) return;
+        $(this).closest(".gm-fold-box").toggleClass("gm-collapsed");
     });
 
     // 점 3개 메뉴 안의 '<' (시작점), '>' (끝점) 클릭
     $(document).on("click", ".gm-set-start", function (e) {
-        $("#gm-drawer-layer").addClass("gm-open");
         e.stopPropagation();
         selectedStartIdx = Number($(this).attr("data-mesid"));
         if (selectedEndIdx !== null && selectedEndIdx < selectedStartIdx) {
@@ -1128,11 +1005,11 @@ function setupListeners() {
         }
         updateRangeHighlight();
         $("#gm-sidebar").addClass("gm-open");
+        $(".gm-drawer-layer").addClass("gm-open");
         toastr.info(`요약 시작점: ${selectedStartIdx + 1}턴 선택됨`, "Genius Memory", { timeOut: 1500 });
     });
 
     $(document).on("click", ".gm-set-end", function (e) {
-        $("#gm-drawer-layer").addClass("gm-open");
         e.stopPropagation();
         selectedEndIdx = Number($(this).attr("data-mesid"));
         if (selectedStartIdx === null || selectedStartIdx > selectedEndIdx) {
@@ -1140,6 +1017,7 @@ function setupListeners() {
         }
         updateRangeHighlight();
         $("#gm-sidebar").addClass("gm-open");
+        $(".gm-drawer-layer").addClass("gm-open");
         toastr.info(`요약 끝점: ${selectedEndIdx + 1}턴 선택됨`, "Genius Memory", { timeOut: 1500 });
     });
 
@@ -1156,9 +1034,36 @@ function setupListeners() {
 
     $("#gm-clear-range-btn").on("click", clearRangeSelection);
     $("#gm-range-sum-btn").on("click", summarizeSelectedRange);
-    $("#gm-batch-sum-btn").on("click", () => {
-        $("#gm-drawer-layer").removeClass("gm-open");
-        runBatchOrAutoSummary(true);
+    $("#gm-batch-sum-btn").on("click", () => runBatchOrAutoSummary(true));
+
+    // 선택 구간을 사건 로어북으로 즉시 정밀 요약
+    $("#gm-range-lore-btn").on("click", async function () {
+        const startTurnVal = Number($("#gm-start-turn").val());
+        const endTurnVal = Number($("#gm-end-turn").val());
+        if (!startTurnVal || !endTurnVal || startTurnVal > endTurnVal) {
+            return toastr.warning("올바른 시작~끝 턴을 먼저 지정해주세요.", "Genius Memory");
+        }
+        const customTitle = prompt("이 구간의 사건 제목을 입력해주세요 (비워두면 AI가 자동 작성):", "");
+        if (customTitle === null) return;
+        $(".gm-drawer-layer").removeClass("gm-open");
+        await summarizeLoreEventRange(customTitle.trim(), startTurnVal, endTurnVal);
+        clearRangeSelection();
+    });
+
+    // 수동으로 현재 조각들을 통합 요약으로 합치기
+    $("#gm-manual-merge-btn").on("click", async function () {
+        const gmData = getChatGMData();
+        if (!gmData || gmData.macro_chunks.length === 0) {
+            return toastr.warning("합칠 요약 조각이 없습니다.", "Genius Memory");
+        }
+        try {
+            await consolidateChunksToMaster(gmData);
+            await saveChatConditional();
+            await refreshUIAndPrompt();
+            toastr.success("요약 조각들이 통합 전체 요약으로 합쳐졌습니다!", "🧠 Genius Memory");
+        } catch (err) {
+            toastr.error(err.message, "통합 오류");
+        }
     });
 
     // 요약 점선 클릭 시 숨김 해제
@@ -1179,47 +1084,102 @@ function setupListeners() {
         toastr.info(`${startIdx + 1} ~ ${endIdx + 1}턴 메시지의 숨김 처리가 해제되었습니다.`, "Genius Memory");
     });
 
-    // 🌟 아코디언 토글 (헤더 클릭 시 접기/펼치기, 단 삭제 버튼 클릭 시엔 제외)
-    $(document).on("click", ".gm-fold-header", function (e) {
-        if ($(e.target).closest(".gm-lore-del, button").length > 0) return;
-        $(this).closest(".gm-fold-box").toggleClass("gm-collapsed");
+    // 텍스트 수정 감지 -> 롤백 버튼 활성화 표시
+    $(document).on("input", "#gm-macro-summary, .gm-chunk-input, #gm-state-tracker, #gm-open-tracker, #gm-items-tracker", function () {
+        isStateDirty = true;
+        $("#gm-rollback-state-btn").addClass("gm-has-unsaved");
     });
 
-    // 🌟 수동으로 현재 조각들을 통합 요약으로 즉시 합치기
-    $("#gm-manual-merge-btn").on("click", async function () {
-        const gmData = getChatGMData();
-        if (!gmData || gmData.macro_chunks.length === 0) {
-            return toastr.warning("합칠 요약 조각이 없습니다.", "Genius Memory");
-        }
-        try {
-            await consolidateChunksToMaster(gmData);
-            await saveChatConditional();
-            await refreshUIAndPrompt();
-            toastr.success("요약 조각들이 통합 전체 요약으로 합쳐졌습니다!", "🧠 Genius Memory");
-        } catch (err) {
-            toastr.error(err.message, "통합 오류");
-        }
+    $(document).on("input", ".gm-lore-title, .gm-lore-keys-only, .gm-lore-content", function () {
+        isLoreDirty = true;
+        $("#gm-rollback-lore-btn").addClass("gm-has-unsaved");
     });
 
-    // 로어북 빈 사건 카드 수동 추가
-    $("#gm-add-lore-btn").on("click", function () {
+    // 마지막 저장값으로 롤백 (메인 상태창)
+    $("#gm-rollback-state-btn").on("click", function () {
+        if (!isStateDirty) return toastr.info("되돌릴 수정사항이 없습니다.", "Genius Memory", { timeOut: 1200 });
+        isStateDirty = false;
+        $("#gm-rollback-state-btn").removeClass("gm-has-unsaved");
+        refreshUIAndPrompt();
+        toastr.info("수정을 취소하고 마지막 저장값으로 되돌렸습니다.", "↩️ 롤백 완료");
+    });
+
+    // 마지막 저장값으로 롤백 (사건 로어북)
+    $("#gm-rollback-lore-btn").on("click", function () {
+        if (!isLoreDirty) return toastr.info("되돌릴 로어북 수정사항이 없습니다.", "Genius Memory", { timeOut: 1200 });
+        isLoreDirty = false;
+        $("#gm-rollback-lore-btn").removeClass("gm-has-unsaved");
         const gmData = getChatGMData();
-        if (!gmData) return;
-        gmData.micro_events.push({ startTurn: "수동", endTurn: "기록", keys: [], content: "", vector: [] });
+        if (gmData) renderLorebookList(gmData);
+        toastr.info("로어북 수정을 취소하고 마지막 저장값으로 되돌렸습니다.", "↩️ 롤백 완료");
+    });
+
+    // [기록 중] 사건 수동 등록
+    $("#gm-add-ongoing-btn").on("click", async function () {
+        const gmData = getChatGMData();
+        const context = getContext();
+        if (!gmData || !context?.chat) return;
+        const defaultTurn = context.chat.length || 1;
+        const title = prompt("현재 시작된 사건의 이름을 입력하세요 (예: 점심 식사):", "");
+        if (!title) return;
+        const turnInput = prompt(`몇 번째 턴부터 시작되었나요? (현재 마지막 턴: ${defaultTurn})`, String(defaultTurn));
+        const sTurn = Number(turnInput) || defaultTurn;
+
+        gmData.ongoing_events.push({ title: title.trim(), startTurn: sTurn });
+        await saveChatConditional();
         renderLorebookList(gmData);
     });
 
-    // 🌟 5번 문제 해결: 로어북 삭제 연타 방지 (즉시 UI 잠금 & [삭제 중...] 표시)
-    let isDeletingLore = false;
+    // [기록 중] 사건 [✅ 지금 완료] 클릭
+    $(document).on("click", ".gm-finish-event-btn", async function (e) {
+        e.stopPropagation();
+        const idx = Number($(this).attr("data-idx"));
+        const gmData = getChatGMData();
+        const context = getContext();
+        if (!gmData || !context?.chat) return;
+
+        const targetEvent = gmData.ongoing_events[idx];
+        if (!targetEvent) return;
+        const currentLastTurn = context.chat.length;
+        const endTurn = Math.max(targetEvent.startTurn, currentLastTurn);
+
+        gmData.ongoing_events.splice(idx, 1);
+        renderLorebookList(gmData);
+        await summarizeLoreEventRange(targetEvent.title, targetEvent.startTurn, endTurn);
+    });
+
+    // [기록 중] 사건 취소(X) 클릭
+    $(document).on("click", ".gm-ongoing-del", async function (e) {
+        e.stopPropagation();
+        const idx = Number($(this).attr("data-idx"));
+        const gmData = getChatGMData();
+        if (!gmData) return;
+        gmData.ongoing_events.splice(idx, 1);
+        await saveChatConditional();
+        renderLorebookList(gmData);
+    });
+
+    // 빈 완료 사건 카드 수동 추가
+    $("#gm-add-lore-btn").on("click", function () {
+        const gmData = getChatGMData();
+        if (!gmData) return;
+        gmData.micro_events.push({ title: "수동 사건", startTurn: "수동", endTurn: "기록", keys: [], content: "", vector: [] });
+        renderLorebookList(gmData);
+    });
+
+    // 완료된 사건 로어북 삭제 (연타 방지 잠금 포함)
     $(document).on("click", ".gm-lore-del", async function (e) {
         e.stopPropagation();
-        if (isDeletingLore) return; // 연속 클릭 원천 차단!
+        if (isDeletingLore) return;
         isDeletingLore = true;
 
         const card = $(this).closest(".gm-lore-card");
         const idx = Number($(this).attr("data-idx"));
         const gmData = getChatGMData();
-        if (!gmData) { isDeletingLore = false; return; }
+        if (!gmData) {
+            isDeletingLore = false;
+            return;
+        }
 
         card.addClass("gm-deleting");
         card.find(".gm-lore-badge").text("⏳ 삭제 중...");
@@ -1233,38 +1193,9 @@ function setupListeners() {
         }
     });
 
-    // 텍스트 수정 감지 -> 롤백 버튼 불 켜기
-    $(document).on("input", "#gm-macro-summary, .gm-chunk-input, #gm-state-tracker, #gm-open-tracker, #gm-items-tracker", function () {
-        isStateDirty = true;
-        $("#gm-rollback-state-btn").addClass("gm-has-unsaved");
-    });
-
-    $(document).on("input", ".gm-lore-keys, .gm-lore-content", function () {
-        isLoreDirty = true;
-        $("#gm-rollback-lore-btn").addClass("gm-has-unsaved");
-    });
-
-    // 🌟 마지막 저장값으로 롤백 (메인 상태창)
-    $("#gm-rollback-state-btn").on("click", function () {
-        if (!isStateDirty) return toastr.info("되돌릴 수정사항이 없습니다.", "Genius Memory", { timeOut: 1200 });
-        isStateDirty = false;
-        $("#gm-rollback-state-btn").removeClass("gm-has-unsaved");
-        refreshUIAndPrompt();
-        toastr.info("수정을 취소하고 마지막 저장값으로 되돌렸습니다.", "↩️ 롤백 완료");
-    });
-
-    // 🌟 마지막 저장값으로 롤백 (사건 로어북)
-    $("#gm-rollback-lore-btn").on("click", function () {
-        if (!isLoreDirty) return toastr.info("되돌릴 로어북 수정사항이 없습니다.", "Genius Memory", { timeOut: 1200 });
-        isLoreDirty = false;
-        $("#gm-rollback-lore-btn").removeClass("gm-has-unsaved");
-        const gmData = getChatGMData();
-        if (gmData) renderLorebookList(gmData);
-        toastr.info("로어북 수정을 취소하고 마지막 저장값으로 되돌렸습니다.", "↩️ 롤백 완료");
-    });
-
-    // 🌟 6번 문제 해결: 백업 내보내기 (Export JSON) & 복원하기 (Import JSON)
-    $("#gm-export-btn").on("click", function () {
+    // 백업 내보내기 (.json)
+    $("#gm-export-btn").on("click", async function () {
+        await autoSaveIfDirty(false);
         const gmData = getChatGMData();
         if (!gmData) return toastr.warning("내보낼 채팅 데이터가 없습니다.");
         const blob = new Blob([JSON.stringify(gmData, null, 2)], { type: "application/json" });
@@ -1277,6 +1208,7 @@ function setupListeners() {
         toastr.success("기억 백업 파일(.json)이 다운로드되었습니다!", "Genius Memory");
     });
 
+    // 백업 불러오기 (.json)
     $("#gm-import-btn").on("click", () => $("#gm-import-file").click());
 
     $("#gm-import-file").on("change", function (e) {
@@ -1289,6 +1221,8 @@ function setupListeners() {
                 const context = getContext();
                 if (!context?.chatMetadata) return;
                 context.chatMetadata.genius_memory = imported;
+                isStateDirty = false;
+                isLoreDirty = false;
                 await saveChatConditional();
                 await refreshUIAndPrompt();
                 toastr.success("백업 데이터를 성공적으로 복원했습니다!", "🧠 Genius Memory");
@@ -1314,10 +1248,10 @@ function addToWandMenu() {
     $("#extensionsMenu").append(wandItemHtml);
 
     $("#gm_wand_button").on("click", async function () {
-     const isClosing = $("#gm-sidebar").hasClass("gm-open");
-     $("#gm-sidebar").toggleClass("gm-open");
-     if (isClosing) await autoSaveIfDirty(true);
- });
+        const isClosing = $("#gm-sidebar").hasClass("gm-open");
+        $("#gm-sidebar").toggleClass("gm-open");
+        if (isClosing) await autoSaveIfDirty(true);
+    });
 }
 
 // 확장 프로그램 초기화
@@ -1335,27 +1269,29 @@ jQuery(async () => {
 
         eventSource.on(event_types.CHAT_CHANGED, () => {
             clearRangeSelection();
+            isStateDirty = false;
+            isLoreDirty = false;
             setTimeout(refreshUIAndPrompt, 200);
         });
 
         eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
-         setTimeout(async () => {
-             injectSceneButtons();
-             await autoSaveIfDirty(false); // 🌟 다음 인풋 전송 시 즉시 자동 저장!
-             const gmData = getChatGMData();
-             if (gmData) updatePromptInjection(gmData);
-         }, 100);
-     });
+            setTimeout(async () => {
+                injectSceneButtons();
+                await autoSaveIfDirty(false);
+                const gmData = getChatGMData();
+                if (gmData) await updatePromptInjection(gmData);
+            }, 100);
+        });
 
         eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => {
             setTimeout(async () => {
                 injectSceneButtons();
-                await detectEventsOnTurn();      // 🌟 매 턴 사건 시작/종료 감지!
-                await runBatchOrAutoSummary(false); // 메인 상태창 턴 단위 요약
+                await detectEventsOnTurn();
+                await runBatchOrAutoSummary(false);
             }, 500);
         });
 
-        console.log("[Genius Memory] 3단계 초기화 완료!");
+        console.log("[Genius Memory] 최종 초기화 완료!");
     } catch (error) {
         console.error("[Genius Memory] 초기화 실패:", error);
     }

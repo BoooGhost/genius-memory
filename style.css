@@ -471,3 +471,24 @@
     background: rgba(16, 185, 129, 0.45);
     color: #fff;
 }
+
+/* 🌟 사건 로어북 펼쳤을 때 텍스트창 시원하게 확대 */
+.gm-lore-content {
+    min-height: 220px !important;
+    max-height: 380px;
+    font-size: 0.84em !important;
+    line-height: 1.5 !important;
+    padding: 8px !important;
+}
+
+/* 🌟 채팅방별 개별 ON/OFF 토글 캡슐 버튼 */
+#gm-room-toggle-btn.gm-room-on {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: #34d399;
+    color: #6ee7b7;
+}
+#gm-room-toggle-btn.gm-room-off {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: #666;
+    color: #999;
+}

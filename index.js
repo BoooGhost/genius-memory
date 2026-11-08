@@ -167,7 +167,19 @@ function getChatGMData() {
     gm.dividers = gm.dividers || [];
     gm.ongoing_events = gm.ongoing_events || [];
     gm.micro_events = gm.micro_events || [];
+
+    // 🌟 방별 활성화 상태 저장 (기본값은 전역 설정값)
+    if (gm.room_enabled === undefined) {
+        gm.room_enabled = extension_settings[extensionName].enabled ?? true;
+    }
     return gm;
+}
+
+// 🌟 현재 채팅방에서 GM이 켜져 있는지 확인하는 전용 함수
+function isRoomEnabled() {
+    const gmData = getChatGMData();
+    if (!gmData) return extension_settings[extensionName].enabled;
+    return gmData.room_enabled !== false;
 }
 
 // 각 메시지의 점 3개(...) 메뉴 안에 '<' 칸과 '>' 칸 주입
@@ -476,7 +488,7 @@ function renderLorebookList(gmData) {
 
 // 프롬프트 주입 (통합 요약 + 1~5 조각 + 로어북/벡터 검색된 과거 사건 + 상태창)
 async function updatePromptInjection(gmData) {
-    if (!extension_settings[extensionName].enabled || !gmData) {
+    if (!isRoomEnabled() || !gmData) {
         if (gmData) renderLorebookList(gmData);
         setExtensionPrompt(PROMPT_KEY, "", extension_prompt_types.BEFORE_PROMPT, 0);
         return;
@@ -530,6 +542,14 @@ async function refreshUIAndPrompt() {
         setExtensionPrompt(PROMPT_KEY, "", extension_prompt_types.BEFORE_PROMPT, 0);
         return;
     }
+
+    // 🌟 현재 방의 ON/OFF 상태에 맞춰 체크박스와 상단 버튼 표시 갱신
+    const roomOn = isRoomEnabled();
+    $("#gm_enabled").prop("checked", roomOn);
+    $("#gm-room-toggle-btn")
+        .removeClass("gm-room-on gm-room-off")
+        .addClass(roomOn ? "gm-room-on" : "gm-room-off")
+        .html(roomOn ? "<span>🟢 ON</span>" : "<span>⚪ OFF</span>");
 
     $("#gm-macro-summary").val(gmData.macro_summary);
     $("#gm-state-tracker").val(gmData.state);
@@ -786,7 +806,7 @@ async function summarizeLoreEventRange(eventTitle, startTurn, endTurn) {
 // 매 턴 돌아가는 다중/교차 사건 시작·종료 감지기
 async function detectEventsOnTurn() {
     const s = extension_settings[extensionName];
-    if (!s.enabled || !s.auto_detect_events || isDetectingEvent) return;
+    if (!isRoomEnabled() || !s.auto_detect_events || isDetectingEvent) return;
 
     const context = getContext();
     const chat = context?.chat;
@@ -978,7 +998,7 @@ async function summarizeSelectedRange() {
 // 일괄 요약 및 자동 요약
 async function runBatchOrAutoSummary(isManualBatch = false) {
     const s = extension_settings[extensionName];
-    if (!s.enabled && !isManualBatch) return;
+    if (!isRoomEnabled() && !isManualBatch) return;
     if (isSummarizing) {
         if (isManualBatch) toastr.warning("이미 요약이 진행 중입니다.", "Genius Memory");
         return;
@@ -1042,10 +1062,30 @@ async function runBatchOrAutoSummary(isManualBatch = false) {
 
 // 이벤트 리스너 등록
 function setupListeners() {
+    // 🌟 현재 채팅방의 활성화 상태 전환 함수
+    async function setCurrentRoomEnabled(newState) {
+        const gmData = getChatGMData();
+        if (gmData) {
+            gmData.room_enabled = newState;
+            await saveChatConditional();
+        } else {
+            extension_settings[extensionName].enabled = newState;
+            saveSettingsDebounced();
+        }
+        await refreshUIAndPrompt();
+        toastr.info(
+            newState ? "이 채팅방에서 Genius Memory가 켜졌습니다. (🟢 ON)" : "이 채팅방에서 Genius Memory가 꺼졌습니다. (⚪ OFF)",
+            "Genius Memory",
+            { timeOut: 1500 }
+        );
+    }
+
     $("#gm_enabled").on("change", function () {
-        extension_settings[extensionName].enabled = $(this).prop("checked");
-        saveSettingsDebounced();
-        refreshUIAndPrompt();
+        setCurrentRoomEnabled($(this).prop("checked"));
+    });
+
+    $(document).on("click", "#gm-room-toggle-btn", function () {
+        setCurrentRoomEnabled(!isRoomEnabled());
     });
     $("#gm_api_url").on("input", function () {
         extension_settings[extensionName].api_url = $(this).val().trim();
@@ -1106,9 +1146,19 @@ function setupListeners() {
     });
 
     // 아코디언 토글 (헤더 클릭 시 접기/펼치기)
+    // 아코디언 토글 (로어북 카드를 펼칠 때 내용 길이에 맞춰 텍스트창 높이 자동 확대!)
     $(document).on("click", ".gm-fold-header", function (e) {
         if ($(e.target).closest(".gm-lore-del, button").length > 0) return;
-        $(this).closest(".gm-fold-box").toggleClass("gm-collapsed");
+        const box = $(this).closest(".gm-fold-box");
+        box.toggleClass("gm-collapsed");
+
+        if (!box.hasClass("gm-collapsed")) {
+            const loreTextarea = box.find(".gm-lore-content")[0];
+            if (loreTextarea) {
+                loreTextarea.style.height = "auto";
+                loreTextarea.style.height = Math.min(360, Math.max(220, loreTextarea.scrollHeight + 12)) + "px";
+            }
+        }
     });
 
     // 점 3개 메뉴 안의 '<' (시작점), '>' (끝점) 클릭

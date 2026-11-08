@@ -351,15 +351,15 @@
 .gm-header-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px; /* 6px -> 4px로 축소 */
     flex-shrink: 0;
 }
 .gm-pill-btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 4px 10px;
-    font-size: 0.75em;
+    gap: 4px;
+    padding: 3px 8px; /* 4px 10px -> 3px 8px로 슬림화 */
+    font-size: 0.72em;
     font-weight: 600;
     white-space: nowrap !important;
     word-break: keep-all !important;

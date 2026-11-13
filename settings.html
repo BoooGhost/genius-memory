@@ -82,9 +82,9 @@
             <div class="gm-control-box">
                 <div class="gm-range-row">
                     <span>🎬 구간:</span>
-                    <input type="number" id="gm-start-turn" class="text_pole gm-range-input" min="1" placeholder="시작" />
+                    <input type="number" id="gm-start-turn" class="text_pole gm-range-input" min="0" placeholder="시작" />
                     <span>~</span>
-                    <input type="number" id="gm-end-turn" class="text_pole gm-range-input" min="1" placeholder="끝" />
+                    <input type="number" id="gm-end-turn" class="text_pole gm-range-input" min="0" placeholder="끝" />
                     <span style="font-size:0.85em; color:#aaa;">턴</span>
                     <button id="gm-clear-range-btn" class="menu_button" style="width:auto; padding:2px 8px; margin-left:auto; font-size:0.78em;">초기화</button>
                 </div>
@@ -118,7 +118,7 @@
                 </div>
                 <div class="gm-fold-body">
                     <div style="font-size:0.76em; color:#fcd34d; font-weight:bold;">🏛️ 통합 전체 요약 (누적 압축본)</div>
-                    <textarea id="gm-macro-summary" class="gm-textarea" style="min-height:85px;" placeholder="조각이 5개 쌓이면 이곳으로 통합 압축됩니다."></textarea>
+                    <textarea id="gm-macro-summary" class="gm-textarea" style="min-height:150px;" placeholder="조각이 5개 쌓이면 이곳으로 통합 압축됩니다."></textarea>
                     
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
                         <span style="font-size:0.76em; color:#93c5fd; font-weight:bold;">🧩 최근 요약 조각 (1~5단계)</span>

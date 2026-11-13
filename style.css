@@ -9,7 +9,7 @@
     height: 100dvh; /* 🌟 모바일 크롬 주소창/하단바를 제외한 실제 보이는 화면 높이에 딱 맞춤! */
     background-color: var(--SmartThemeBlurTintColor, rgba(20, 20, 20, 0.95));
     border-left: 1px solid var(--SmartThemeBorderColor, #444);
-    z-index: 2000;
+    z-index: 9999;
     transition: right 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     display: flex;
     flex-direction: column;
@@ -491,4 +491,38 @@
     background: rgba(255, 255, 255, 0.05);
     border-color: #666;
     color: #999;
+}
+
+/* 🌟 통합 요약 및 조각 토글 텍스트창 크게 보기 */
+#gm-macro-summary {
+    min-height: 150px;
+    max-height: 340px;
+    line-height: 1.5;
+}
+.gm-chunk-input {
+    min-height: 130px !important;
+    max-height: 280px;
+    line-height: 1.48 !important;
+}
+.gm-chunk-slot.gm-fold-box {
+    border: 1px dashed rgba(147, 197, 253, 0.35);
+    background: rgba(255, 255, 255, 0.02);
+}
+.gm-clear-chunk-btn {
+    cursor: pointer;
+    color: #f87171;
+    font-size: 0.88em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(248, 113, 113, 0.1);
+}
+.gm-clear-chunk-btn:hover {
+    background: rgba(248, 113, 113, 0.25);
+    color: #fca5a5;
+}
+@media (max-width: 768px) {
+    #gm-sidebar {
+        padding-top: max(16px, env(safe-area-inset-top, 12px)) !important;
+        padding-bottom: max(22px, env(safe-area-inset-bottom, 16px)) !important;
+    }
 }

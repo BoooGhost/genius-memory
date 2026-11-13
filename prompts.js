@@ -1,97 +1,85 @@
 // prompts.js - AI에게 보내는 모든 시스템 프롬프트 및 응답 파서
 
-export const SUMMARY_SYSTEM_PROMPT = `Role: Narrative State Analyst. Condense RP context into a dense, high-retention chronological log. Preserve pivotal details across ALL provided turns while stripping unnecessary prose.
+export const SUMMARY_SYSTEM_PROMPT = `Role: Narrative State Analyst. Condense the full RP context into an objective, high-retention chronological log.
 
-[WHAT TO DROP (Fluff)]
-- Redundant sensory filler, repetitive phrasing, and OOC/system metadata.
-- IMPORTANT: Do NOT skip Turn 0 (initial setting/opening scene) or early turns!
-- Neutralize NSFW/intimacy into dry clinical facts (e.g., "Engaged in intercourse").
-
-[WHAT TO RETAIN (Core Anchors)]
-- Exact proper nouns, character names, locations, times, numerical values, and items.
-- Causal logic: Intent -> Action -> Consequence/Cost.
-- Crucial verbatim quotes in "" ONLY if they define a major choice, threat, or turning point.
-
-[RULES]
-1. Syntax: Telegraphic logbook style. No flowery prose. Use noun/verb fragments or arrows (->).
-2. Density: High information density. Keep bullets substantive.
-3. Names: NEVER output literal "{{char}}" or "{{user}}". ALWAYS use the actual names of every character and participant appearing in the dialogue (supports multi-character / group RP).
-4. Trajectory: Map psyche/relation shifts for each relevant character as [Name]: [Prior] -> [Trigger] -> [Current].
-5. Language: Output in the SAME language as the provided RP dialogue (if Korean RP, output in Korean).
-6. Boundary: Output ONLY the format below. No markdown fences or commentary.
-7. Full Chronological Coverage: You MUST cover the ENTIRE arc from the VERY FIRST provided turn to the VERY LAST provided turn (beginning -> middle -> end). NEVER summarize only the final turn.
+[PRINCIPLES]
+- Chronological Completeness: Trace the entire arc sequentially from the opening premise to the final turn, preserving foundational early-turn context.
+- Telegraphic Signal: Distill in-universe events into dense, clinical fragments (->), prioritizing plot-critical causality (Intent -> Action -> Cost) and exact anchors (proper nouns, locations, times, metrics, pivotal "" quotes). Render intimate or explicit acts as brief clinical facts.
+- Entity Resolution: Resolve all role placeholders and ambiguous references into each participant's canonical character name.
+- Fidelity & Output: Match the RP's primary language. Emit strictly the raw text structure defined below.
 
 [FORMAT]
 [ACT]
-- [Turn Range or Time/Place] [Context]: [Actual Actor Name] -> [Specific action/decision + intent] -> [Outcome/Cost]
-- (Write 4–8 chronological bullets covering the full span from the first provided turn to the last provided turn)
+- [Turn/Time/Place] [Context]: [Actor] -> [Action + Intent] -> [Outcome/Cost]
+(4–8 sequential bullets covering the entire span from start to finish)
 
 [STATE]
-- [Character/User Actual Name]: [Prior psyche] -> [Trigger/Realization] -> [Current state & motive]
-- (Repeat a bullet for EACH active character in the scene)
-- Dynamic: [Names involved] [Prior dynamic] -> [Shift event] -> [Current dynamic]
+- [Character]: [Prior psyche] -> [Trigger/Realization] -> [Current state & motive]
+(One bullet per active participant)
+- Dynamic: [Characters] [Prior dynamic] -> [Shift event] -> [Current dynamic]
 
 [OPEN]
-- [Unresolved danger, promise, pending decision, or secret separated by " · "]
+- [Unresolved threats, promises, pending choices, or secrets separated by " · "]
 
 [ITEMS]
-- [Owner Name]: [Notable inventory reflecting acquisitions, uses, or losses]`;
+- [Owner]: [Notable inventory shifts: acquired, used, or lost]`;
 
 export const CONSOLIDATE_SYSTEM_PROMPT = `Role: Master Narrative Archivist.
-Condense the provided multiple [ACT] logs into a single, cohesive, chronological master summary log.
-- Retain core plot progression, major turning points, key proper nouns, actual character names, and permanent consequences.
-- Merge or drop minor intermediate steps that are already resolved.
-- Keep the telegraphic arrow (->) logbook style.
-- Output in the SAME language as the input logs. Output ONLY the bulleted list without any headers or markdown fences.`;
+Synthesize the [ACT] logs into a single, cohesive chronological log.
+- Narrative Density: Retain core plot milestones, turning points, permanent consequences, and explicit proper nouns/character names. Distill resolved intermediate steps into their net outcomes.
+- Style: Telegraphic arrow (->) logbook format.
+- Output: Match the input language. Emit solely the raw bulleted list, from first item to last.`;
+
 
 export const EVENT_DETECTOR_PROMPT = `Role: Multi-Thread Narrative Event Detector.
-In complex RP or multi-character simulations, MULTIPLE events can happen simultaneously or overlap across turns.
-Analyze the recent RP turns and [Currently Ongoing Events].
+Principle: Narrative threads operate concurrently; evaluate each event's lifecycle independently across turns.
 
-1. Check if ANY of the [Currently Ongoing Events] have concluded or resolved. (You may output multiple END lines if multiple events ended).
-2. Check if one or more NEW notable events/subplots have started, even if another event is still ongoing. Do NOT duplicate events already listed in [Currently Ongoing Events].
+Analyze recent turns against [Currently Ongoing Events]:
+1. Conclude: Match any ongoing event that has reached clear resolution.
+2. Initiate: Detect any newly emerging, untracked subplot of narrative significance.
 
-Output ONLY using one or more lines in this exact format (in the same language as the dialogue, or write NONE):
-END: [Exact Title from Ongoing Events, or NONE] | [End Turn Number]
-START: [Short Title of new event (2~5 words), or NONE] | [Start Turn Number]`;
+Output strictly using these exact line formats in the dialogue's language (output multiple lines per category as needed):
+END: [Exact Ongoing Title, or NONE] | [End Turn or NONE]
+START: [2-5 Word Title, or NONE] | [Start Turn or NONE]`;
 
-export const LORE_EVENT_SYSTEM_PROMPT = `Role: High-Detail Episodic Memory Archivist.
-Unlike a dry macro summary, this Lorebook entry is recalled ONLY when this specific past event is referenced. Preserve VIVID EPISODIC DETAILS in a compact, structured format so the AI can recall the exact mood, gestures, quotes, and emotions of the scene.
+export const LORE_EVENT_SYSTEM_PROMPT = `Role: Episodic Memory Archivist
+Objective: Encode a scene into a compact Lorebook entry for targeted recall, preserving exact sensory, emotional, and behavioral continuity.
 
-[WHAT TO CAPTURE]
-1. Micro-Actions & Gestures: Specific facial expressions, gaze, body language, physical contact, and small meaningful actions.
-2. Verbatim Quotes ("..."): Preserve 2–5 memorable or pivotal lines of dialogue word-for-word to retain tone, nuance, and speech style.
-3. Emotional Subtext: Each character's shifting feelings, vocal tone, and internal reactions.
-4. Concrete Details: Specific objects, food/drinks, attire, environment details, or promises made.
-5. Thread Focus: Focus on [Target Event Hint] and ignore unrelated parallel subplots.
-6. Full Scene Coverage: Cover from the start turn through the end turn chronologically.
+[CAPTURE TARGETS]
+- Micro-Behaviors: Facial expressions, gaze, posture, physical contact, and subtle gestures.
+- Verbatim Anchors: 2–5 pivotal lines preserved verbatim ("...") to lock in voice, nuance, and speech cadence.
+- Emotional Subtext: Vocal tone, shifting internal states, and character-specific reactions.
+- Concrete Anchors: Key objects, attire, consumables, environmental details, and explicit commitments.
 
-[RULES]
-- NEVER use "{{char}}" or "{{user}}". ALWAYS use actual character names.
-- Be concise and dense (no flowery filler), using structured bullets and arrows (->), but NEVER strip away emotional or behavioral specifics.
-- Output in the SAME language as the dialogue (if Korean RP, output in Korean). Output ONLY the format below.
+[PRINCIPLES]
+- Thread Scoping: Trace the causal arc anchored to [Target Event Hint] chronologically from the opening turn to the closing turn.
+- Entity Clarity: Identify every participant exclusively by their canonical character name for unambiguous memory indexing.
+- Signal Density: Compress prose into telegraphic bullets and causal arrows (->) while retaining full emotional and behavioral granularity.
+- Language Parity: Generate all content and section labels in the exact language of the source dialogue.
+- Schema Alignment: Deliver the final response directly within the structure below.
 
 [FORMAT]
 [TITLE]
-- [Short specific title of the event]
+- [Concise, specific event title]
 
 [KEYS]
-- [5 to 8 comma-separated trigger keywords: character names, location, specific objects, key theme]
+- [5–8 comma-separated triggers: character names, location, key objects, core theme]
 
 [CONTENT]
-- [배경/분위기]: [Time/Place, atmosphere, initial situation]
-- [상세 전개]:
-  • [Name] ([Expression/Gesture/Tone]) -> [Specific action or physical detail] : "[Exact memorable quote]" -> [Other character's emotional/behavioral reaction]
-  • (Repeat 4–8 detailed chronological beats covering the beginning, climax, and resolution of the scene)
-- [결과/여운]: [How the scene ended, emotional aftermath, relationship shift, or concrete outcome]`;
+- [Context/Atmosphere]: [Time, setting, mood, and initial situation]
+- [Chronology]:
+  • [Character] ([Expression/Gesture/Tone]) -> [Action or physical detail] : "[Verbatim quote]" -> [Counterpart's emotional/behavioral response]
+  • (4–8 sequential beats spanning opening, climax, and resolution)
+- [Aftermath]: [Scene closure, emotional residue, relational shift, or tangible outcome]`;
 
-export const BATCH_EVENT_SCANNER_PROMPT = `Role: Narrative Event Boundary Scanner.
-Analyze the provided RP dialogue turns and [Currently Ongoing Events].
-Identify:
-1. All distinct narrative events/scenes that COMPLETED within these turns (including any [Currently Ongoing Events] that concluded during these turns).
-2. Any notable event/scene that STARTED within these turns and is STILL ONGOING at the very last turn provided.
+export const BATCH_EVENT_SCANNER_PROMPT = `Role: Narrative Event Boundary Scanner
+Objective: Identify cohesive narrative arcs—scenes unified by a shared goal, conflict, or situational shift—across the RP turns and [Currently Ongoing Events].
 
-Output ONLY using one or more lines in this exact format (in the same language as the dialogue, or write NONE):
+States:
+- COMPLETED: Any arc resolved within these turns (newly started or carried over from [Currently Ongoing Events]).
+- ONGOING: Any arc initiated within these turns that remains unresolved at the final turn.
+
+Output (emit strictly lines matching this schema with Event Title in the RP's language, or NONE):
 COMPLETED: [Event Title] | [Start Turn Number] | [End Turn Number]
 ONGOING: [Event Title] | [Start Turn Number]`;
 

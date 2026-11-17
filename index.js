@@ -467,13 +467,21 @@ jQuery(async () => {
             }, 100);
         });
 
-        eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => {
+        // 기존 CHARACTER_MESSAGE_RENDERED 부분을 아래 코드로 교체
+        const handleAfterCharacterTurn = () => {
             setTimeout(async () => {
                 injectSceneButtons();
                 await detectEventsOnTurn();
                 await runBatchOrAutoSummary(false);
-            }, 500);
-        });
+            }, 600);
+        };
+
+        eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, handleAfterCharacterTurn);
+        if (event_types.GENERATION_ENDED) {
+            eventSource.on(event_types.GENERATION_ENDED, () => {
+                setTimeout(injectSceneButtons, 200);
+            });
+        }
 
         console.log("[Genius Memory] 모듈 분리 버전(v0.2.0) 초기화 완료!");
     } catch (error) {

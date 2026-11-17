@@ -157,6 +157,24 @@ export async function summarizeLoreEventRange(eventTitle, startTurn, endTurn) {
     toastr.success(`✅ 사건 [${finalTitle}] (${sIdx}~${eIdx}턴) 로어북 기록 완료!`, "🧠 Genius Memory");
 }
 
+// 헬퍼 함수: AI가 "**START:** [사건 제목] | Turn 12" 처럼 대답해도 깔끔하게 정제
+function cleanTitleText(raw) {
+    if (!raw) return "";
+    return raw
+        .replace(/\*\*/g, "")
+        .replace(/^\[|\]$/g, "")
+        .replace(/^["']|["']$/g, "")
+        .trim();
+}
+
+function extractTurnNumber(raw, fallbackTurn) {
+    if (raw === undefined || raw === null) return fallbackTurn;
+    const numMatch = String(raw).match(/\d+/);
+    if (!numMatch) return fallbackTurn;
+    const parsed = parseInt(numMatch[0], 10);
+    return Number.isNaN(parsed) ? fallbackTurn : parsed; // 0이어도 절대 무시되지 않음!
+}
+
 export async function detectEventsOnTurn() {
     const s = extension_settings[extensionName];
     if (!isRoomEnabled() || !s.auto_detect_events || runtime.isDetectingEvent) return;
@@ -168,61 +186,88 @@ export async function detectEventsOnTurn() {
 
     runtime.isDetectingEvent = true;
     try {
-        const lastTurnIdx = chat.length - 1;
-        const startLookback = Math.max(0, chat.length - 3);
-        const recentLines = [];
-        for (let i = startLookback; i < chat.length; i++) {
-            recentLines.push(`[Turn ${i}] ${chat[i].name}: ${cleanMessageText(chat[i].mes)}`);
+        // 최근 유효 대화를 최대 5개까지 가져옴 -> 초반 대화(0, 1, 2, 3, 4턴)에서 Turn 0이 절대 잘리지 않음!
+        const recentEntries = [];
+        for (let i = chat.length - 1; i >= 0 && recentEntries.length < 5; i--) {
+            if (!chat[i] || chat[i].extra?.isSmallSys) continue;
+            const cleaned = cleanMessageText(chat[i].mes);
+            if (cleaned) {
+                recentEntries.unshift({ turn: i, text: `[Turn ${i}] ${chat[i].name}: ${cleaned}` });
+            }
         }
+
+        if (recentEntries.length === 0) return;
+
+        const firstVisibleTurn = recentEntries[0].turn; // 초반엔 0이 됨
+        const lastTurnIdx = recentEntries[recentEntries.length - 1].turn;
+        const recentLines = recentEntries.map(e => e.text);
 
         const ongoingListStr = gmData.ongoing_events.length > 0
             ? gmData.ongoing_events.map(e => `- "${e.title}" (Started at Turn ${e.startTurn})`).join("\n")
             : "None";
 
-        const detectorInput = `[Currently Ongoing Events]\n${ongoingListStr}\n\n[Recent Dialogue (Up to Turn ${lastTurnIdx})]\n${recentLines.join("\n\n")}`;
+        const detectorInput = `[Currently Ongoing Events]\n${ongoingListStr}\n\n[Recent Dialogue (Turns ${firstVisibleTurn} to ${lastTurnIdx} — Note: Turn 0 is the opening scene)]\n${recentLines.join("\n\n")}`;
         const result = await callSubAPI(EVENT_DETECTOR_PROMPT, detectorInput);
+        console.debug("[Genius Memory] 사건 감지 AI 응답:\n", result);
 
         let changed = false;
+        const lines = result.split(/\r?\n/);
 
-        const endMatches = [...result.matchAll(/END:\s*([^|\n]+)\|\s*(\d+)/gi)];
-        for (const match of endMatches) {
-            const endedTitle = match[1].trim().replace(/^["']|["']$/g, "");
-            const parsedEnd = Number(match[2]);
-            const endTurnNum = !isNaN(parsedEnd) ? parsedEnd : lastTurnIdx;
+        for (const rawLine of lines) {
+            const line = rawLine.replace(/^[\s\-*•\d.)]+/, "").replace(/\*\*/g, "").trim();
+            if (!line) continue;
 
-            if (endedTitle.toUpperCase() !== "NONE" && gmData.ongoing_events.length > 0) {
-                const targetIdx = gmData.ongoing_events.findIndex(e =>
-                    endedTitle.toLowerCase().includes(e.title.toLowerCase()) ||
-                    e.title.toLowerCase().includes(endedTitle.toLowerCase())
-                );
-                if (targetIdx !== -1) {
-                    const targetEvent = gmData.ongoing_events.splice(targetIdx, 1)[0];
-                    changed = true;
-                    await summarizeLoreEventRange(
-                        targetEvent.title,
-                        targetEvent.startTurn,
-                        Math.max(targetEvent.startTurn, endTurnNum)
+            // 1) END 파싱
+            const endMatch = line.match(/^END\s*:\s*([^|]+)(?:\|\s*(.+))?$/i);
+            if (endMatch) {
+                const endedTitle = cleanTitleText(endMatch[1]);
+                const endTurnNum = Math.min(lastTurnIdx, extractTurnNumber(endMatch[2], lastTurnIdx));
+
+                if (endedTitle && endedTitle.toUpperCase() !== "NONE" && gmData.ongoing_events.length > 0) {
+                    const targetIdx = gmData.ongoing_events.findIndex(e =>
+                        endedTitle.toLowerCase().includes(e.title.toLowerCase()) ||
+                        e.title.toLowerCase().includes(endedTitle.toLowerCase())
                     );
+                    if (targetIdx !== -1) {
+                        const targetEvent = gmData.ongoing_events.splice(targetIdx, 1)[0];
+                        changed = true;
+                        await summarizeLoreEventRange(
+                            targetEvent.title,
+                            targetEvent.startTurn,
+                            Math.max(targetEvent.startTurn, endTurnNum)
+                        );
+                    }
                 }
+                continue;
             }
-        }
 
-        const startMatches = [...result.matchAll(/START:\s*([^|\n]+)\|\s*(\d+)/gi)];
-        for (const match of startMatches) {
-            const newTitle = match[1].trim().replace(/^["']|["']$/g, "");
-            const parsedStart = Number(match[2]);
-            const startTurnNum = !isNaN(parsedStart) ? parsedStart : lastTurnIdx;
+            // 2) START 파싱
+            const startMatch = line.match(/^START\s*:\s*([^|]+)(?:\|\s*(.+))?$/i);
+            if (startMatch) {
+                const newTitle = cleanTitleText(startMatch[1]);
+                // 초반 첫 사건인데 AI가 번호를 생략했을 경우 firstVisibleTurn(0턴)부터 잡도록 안전 처리
+                const fallbackStart = (gmData.ongoing_events.length === 0 && gmData.micro_events.length === 0 && firstVisibleTurn === 0)
+                    ? 0
+                    : lastTurnIdx;
+                let startTurnNum = extractTurnNumber(startMatch[2], fallbackStart);
 
-            if (
-                newTitle.toUpperCase() !== "NONE" &&
-                !gmData.ongoing_events.some(e => e.title.toLowerCase() === newTitle.toLowerCase())
-            ) {
-                gmData.ongoing_events.push({
-                    title: newTitle,
-                    startTurn: startTurnNum
-                });
-                changed = true;
-                toastr.info(`⏳ 새 사건 감지됨: [${newTitle}] (${startTurnNum}턴~ 기록 중)`, "🧠 Genius Memory", { timeOut: 2500 });
+                // 만약 첫 사건이고 Turn 0부터 이어진 대화인데 AI가 습관적으로 1이라고 적었을 경우 0턴 오프닝이 빠지지 않게 보정(선택적 안전장치)
+                if (startTurnNum === 1 && firstVisibleTurn === 0 && gmData.ongoing_events.length === 0 && gmData.micro_events.length === 0) {
+                    startTurnNum = 0;
+                }
+
+                if (
+                    newTitle &&
+                    newTitle.toUpperCase() !== "NONE" &&
+                    !gmData.ongoing_events.some(e => e.title.toLowerCase() === newTitle.toLowerCase())
+                ) {
+                    gmData.ongoing_events.push({
+                        title: newTitle,
+                        startTurn: Math.max(0, Math.min(lastTurnIdx, startTurnNum))
+                    });
+                    changed = true;
+                    toastr.info(`⏳ 새 사건 감지됨: [${newTitle}] (${startTurnNum}턴~ 기록 중)`, "🧠 Genius Memory", { timeOut: 2500 });
+                }
             }
         }
 
@@ -231,7 +276,7 @@ export async function detectEventsOnTurn() {
             renderLorebookList(gmData);
         }
     } catch (err) {
-        console.warn("[Genius Memory] 사건 감지 패스:", err);
+        console.warn("[Genius Memory] 사건 감지 오류:", err);
     } finally {
         runtime.isDetectingEvent = false;
     }
@@ -254,37 +299,45 @@ export async function scanAndSummarizeEventsForBatch(batchIndices) {
 
     const scannerInput = `[Currently Ongoing Events]\n${ongoingListStr}\n\n[Dialogue (Turns ${sTurn} to ${eTurn})]\n${lines}`;
     const result = await callSubAPI(BATCH_EVENT_SCANNER_PROMPT, scannerInput);
+    console.debug("[Genius Memory] 일괄 사건 스캔 응답:\n", result);
 
-    const completedMatches = [...result.matchAll(/COMPLETED:\s*([^|\n]+)\|\s*(\d+)\s*\|\s*(\d+)/gi)];
-    for (const match of completedMatches) {
-        const title = match[1].trim().replace(/^["']|["']$/g, "");
-        let startT = !isNaN(Number(match[2])) ? Number(match[2]) : sTurn;
-        const endT = !isNaN(Number(match[3])) ? Number(match[3]) : eTurn;
+    for (const rawLine of result.split(/\r?\n/)) {
+        const line = rawLine.replace(/^[\s\-*•\d.)]+/, "").replace(/\*\*/g, "").trim();
+        if (!line) continue;
 
-        if (title.toUpperCase() === "NONE") continue;
+        const compMatch = line.match(/^COMPLETED\s*:\s*([^|]+)\|\s*([^|]+)\|\s*(.+)$/i);
+        if (compMatch) {
+            const title = cleanTitleText(compMatch[1]);
+            let startT = extractTurnNumber(compMatch[2], sTurn);
+            const endT = extractTurnNumber(compMatch[3], eTurn);
 
-        const ongoingIdx = gmData.ongoing_events.findIndex(e =>
-            title.toLowerCase().includes(e.title.toLowerCase()) ||
-            e.title.toLowerCase().includes(title.toLowerCase())
-        );
-        if (ongoingIdx !== -1) {
-            startT = gmData.ongoing_events[ongoingIdx].startTurn;
-            gmData.ongoing_events.splice(ongoingIdx, 1);
+            if (!title || title.toUpperCase() === "NONE") continue;
+
+            const ongoingIdx = gmData.ongoing_events.findIndex(e =>
+                title.toLowerCase().includes(e.title.toLowerCase()) ||
+                e.title.toLowerCase().includes(title.toLowerCase())
+            );
+            if (ongoingIdx !== -1) {
+                startT = gmData.ongoing_events[ongoingIdx].startTurn;
+                gmData.ongoing_events.splice(ongoingIdx, 1);
+            }
+
+            await summarizeLoreEventRange(title, startT, Math.max(startT, endT));
+            continue;
         }
 
-        await summarizeLoreEventRange(title, startT, Math.max(startT, endT));
-    }
+        const ongMatch = line.match(/^ONGOING\s*:\s*([^|]+)(?:\|\s*(.+))?$/i);
+        if (ongMatch) {
+            const title = cleanTitleText(ongMatch[1]);
+            const startT = extractTurnNumber(ongMatch[2], sTurn);
 
-    const ongoingMatches = [...result.matchAll(/ONGOING:\s*([^|\n]+)\|\s*(\d+)/gi)];
-    for (const match of ongoingMatches) {
-        const title = match[1].trim().replace(/^["']|["']$/g, "");
-        const startT = !isNaN(Number(match[2])) ? Number(match[2]) : sTurn;
-
-        if (
-            title.toUpperCase() !== "NONE" &&
-            !gmData.ongoing_events.some(e => e.title.toLowerCase() === title.toLowerCase())
-        ) {
-            gmData.ongoing_events.push({ title, startTurn: startT });
+            if (
+                title &&
+                title.toUpperCase() !== "NONE" &&
+                !gmData.ongoing_events.some(e => e.title.toLowerCase() === title.toLowerCase())
+            ) {
+                gmData.ongoing_events.push({ title, startTurn: startT });
+            }
         }
     }
 

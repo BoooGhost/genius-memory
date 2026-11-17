@@ -32,15 +32,25 @@ Synthesize the [ACT] logs into a single, cohesive chronological log.
 
 
 export const EVENT_DETECTOR_PROMPT = `Role: Multi-Thread Narrative Event Detector.
-Principle: Narrative threads operate concurrently; evaluate each event's lifecycle independently across turns.
+Principle: Narrative threads run concurrently; evaluate each event's lifecycle independently across turns.
 
-Analyze recent turns against [Currently Ongoing Events]:
-1. Conclude: Match any ongoing event that has reached clear resolution.
-2. Initiate: Detect any newly emerging, untracked subplot of narrative significance.
+Task: Analyze [Recent Dialogue] against [Currently Ongoing Events].
+- END: An ongoing event reaches a clear resolution, conclusion, or scene transition.
+- START: A notable new scene, conflict, promise, activity, or subplot begins.
 
-Output strictly using these exact line formats in the dialogue's language (output multiple lines per category as needed):
-END: [Exact Ongoing Title, or NONE] | [End Turn or NONE]
-START: [2-5 Word Title, or NONE] | [Start Turn or NONE]`;
+Output Specifications:
+- Plain Text: Generate strictly raw, unformatted text matching the exact template below.
+- Turn ID: Extract only the literal integer X from the corresponding "[Turn X]" header (indexing starts at 0).
+- Event Title: For END, copy the exact title from [Currently Ongoing Events]. For START, write a concise title in the dialogue's primary language.
+- Null State: If no event is detected for a category, output "NONE | NONE".
+
+Output Template:
+END: Exact Ongoing Title | 14
+START: Concise New Event Title | 0
+
+Fallback Template:
+END: NONE | NONE
+START: NONE | NONE`;
 
 export const LORE_EVENT_SYSTEM_PROMPT = `Role: Episodic Memory Archivist
 Objective: Encode a scene into a compact Lorebook entry for targeted recall, preserving exact sensory, emotional, and behavioral continuity.
@@ -73,15 +83,19 @@ Objective: Encode a scene into a compact Lorebook entry for targeted recall, pre
 - [Aftermath]: [Scene closure, emotional residue, relational shift, or tangible outcome]`;
 
 export const BATCH_EVENT_SCANNER_PROMPT = `Role: Narrative Event Boundary Scanner
-Objective: Identify cohesive narrative arcs—scenes unified by a shared goal, conflict, or situational shift—across the RP turns and [Currently Ongoing Events].
+Task: Identify cohesive narrative arcs—scenes unified by a shared goal, conflict, or situational shift—across the RP turns and [Currently Ongoing Events].
 
-States:
-- COMPLETED: Any arc resolved within these turns (newly started or carried over from [Currently Ongoing Events]).
-- ONGOING: Any arc initiated within these turns that remains unresolved at the final turn.
+Arc States:
+- COMPLETED: Arcs resolved within these turns (newly started or resolved from [Currently Ongoing Events]).
+- ONGOING: Arcs initiated within these turns that remain unresolved at the final turn.
 
-Output (emit strictly lines matching this schema with Event Title in the RP's language, or NONE):
-COMPLETED: [Event Title] | [Start Turn Number] | [End Turn Number]
-ONGOING: [Event Title] | [Start Turn Number]`;
+[Principles & Output Schema]
+- Direct Index Mapping: Extract the exact 0-based integer directly from each "[Turn X]" header, starting at 0 for the opening turn.
+- Format Purity: Output strictly unformatted plain text. Represent turn boundaries solely as standalone integers and write titles in the RP's native language.
+- Schema: Emit only lines matching these exact patterns (or output NONE):
+
+COMPLETED: Event Title | 0 | 6
+ONGOING: Event Title | 7`;
 
 export function parseSummaryOutput(text) {
     const actMatch = text.match(/\[ACT\]\s*([\s\S]*?)(?=\[STATE\]|\[OPEN\]|\[ITEMS\]|\[KEYS\]|$)/i);

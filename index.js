@@ -458,13 +458,12 @@ jQuery(async () => {
             setTimeout(refreshUIAndPrompt, 200);
         });
 
-        eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
-            setTimeout(async () => {
-                injectSceneButtons();
-                await autoSaveIfDirty(false);
-                const gmData = getChatGMData();
-                if (gmData) await updatePromptInjection(gmData);
-            }, 100);
+        // index.js 하단 USER_MESSAGE_RENDERED 부분 추천 수정
+        eventSource.on(event_types.USER_MESSAGE_RENDERED, async () => {
+            injectSceneButtons();
+            await autoSaveIfDirty(false);
+            const gmData = getChatGMData();
+            if (gmData) await updatePromptInjection(gmData);
         });
 
         // 기존 CHARACTER_MESSAGE_RENDERED 부분을 아래 코드로 교체

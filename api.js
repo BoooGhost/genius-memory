@@ -89,17 +89,53 @@ export function cosineSimilarity(vecA, vecB) {
     return (normA && normB) ? (dot / (Math.sqrt(normA) * Math.sqrt(normB))) : 0;
 }
 
+// 검색 노이즈 제거용: 추론 태그 및 흔한 상태창/시스템 코드블록 제거, 순수 대사/지문만 남김
+function extractPureDialogue(rawMes) {
+    if (!rawMes) return "";
+    return cleanMessageText(rawMes)
+        .replace(/<status[\s\S]*?<\/status>/gi, "")
+        .replace(/<info[\s\S]*?<\/info>/gi, "")
+        .replace(/```[\s\S]*?```/g, "") // 상태창/요약 코드블록 제외
+        .trim();
+}
+
 export async function retrieveRelevantEvents(gmData) {
     const events = gmData?.micro_events || [];
     if (events.length === 0) return [];
 
     const context = getContext();
     const chat = context?.chat || [];
-    const recentText = chat.slice(-4).map(m => cleanMessageText(m.mes)).join(" ").toLowerCase();
+    const s = extension_settings[extensionName];
+
+    // 1. 시스템/숨김(요약된) 메시지를 제외하고, 순수한 최신 [유저 입력 + 캐릭터 응답] 최대 3개만 추출!
+    const pureRecentMessages = [];
+    for (let i = chat.length - 1; i >= 0 && pureRecentMessages.length < 3; i--) {
+        const m = chat[i];
+        if (!m) continue;
+        if (m.is_system || m.extra?.isSmallSys) continue; // 숨겨진 턴 & 시스템 알림 완벽 제외
+        // 유저 메시지(is_user)이거나 실제 캐릭터 응답인 경우만 허용
+        const cleaned = extractPureDialogue(m.mes);
+        if (cleaned) {
+            pureRecentMessages.unshift(cleaned);
+        }
+    }
+
+    const recentText = pureRecentMessages.join(" ").toLowerCase();
     if (!recentText.trim()) return [];
 
+    // 매 턴 무조건 등장하는 유저 본인 이름 / 메인 캐릭터 이름은 키워드 가산점에서 제외 (오작동 핵심 방지!)
+    const ignoreNames = new Set(
+        [context.name1, context.name2]
+            .filter(Boolean)
+            .map(n => n.toLowerCase().trim())
+    );
+
     const queryVec = await computeVector(recentText);
-    const topK = Number(extension_settings[extensionName].recall_top_k) || 3;
+    const topK = Number(s.recall_top_k) || 3;
+    const usingExternalEmbed = Boolean(s.embed_model && s.api_url && s.api_key);
+
+    // 외부 임베딩 API는 기본 유사도가 높게 나오므로 0.45, 내장 로컬 벡터는 0.28을 기준점으로 설정
+    const threshold = usingExternalEmbed ? 0.45 : 0.28;
 
     const scored = [];
     for (let idx = 0; idx < events.length; idx++) {
@@ -110,14 +146,19 @@ export async function retrieveRelevantEvents(gmData) {
         }
 
         let matchedKeys = 0;
-        for (const k of ev.keys) {
-            if (k && recentText.includes(k.toLowerCase())) matchedKeys++;
+        for (const rawKey of ev.keys) {
+            const k = (rawKey || "").toLowerCase().trim();
+            // 1글자 이하의 너무 짧은 단어나, 항상 불려지는 캐릭터/유저 이름은 보너스에서 패스!
+            if (k.length < 2 || ignoreNames.has(k)) continue;
+            if (recentText.includes(k)) matchedKeys++;
         }
-        if (ev.title && recentText.includes(ev.title.toLowerCase())) {
+
+        const cleanTitle = (ev.title || "").toLowerCase().trim();
+        if (cleanTitle.length >= 2 && !ignoreNames.has(cleanTitle) && recentText.includes(cleanTitle)) {
             matchedKeys++;
         }
 
-        const keywordBonus = matchedKeys > 0 ? Math.min(0.6, matchedKeys * 0.25) : 0;
+        const keywordBonus = matchedKeys > 0 ? Math.min(0.45, matchedKeys * 0.18) : 0;
         const vecScore = cosineSimilarity(queryVec, ev.vector);
         const totalScore = Number((vecScore + keywordBonus).toFixed(3));
 
@@ -127,7 +168,7 @@ export async function retrieveRelevantEvents(gmData) {
     }
 
     const selected = scored
-        .filter(item => item.totalScore >= 0.15)
+        .filter(item => item.totalScore >= threshold)
         .sort((a, b) => b.totalScore - a.totalScore)
         .slice(0, topK);
 

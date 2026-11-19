@@ -119,6 +119,16 @@ export async function summarizeLoreEventRange(eventTitle, startTurn, endTurn) {
     const eIdx = Math.min(chat.length - 1, Number(endTurn));
     if (sIdx > eIdx) return;
 
+    // 🛡️ 중복 생성 방지 가드: 이미 완전히 똑같은 턴 구간(sIdx~eIdx)에 생성된 로어북이 있으면 스킵!
+    const isDuplicateRange = (gmData.micro_events || []).some(
+        ev => Number(ev.startTurn) === sIdx && Number(ev.endTurn) === eIdx
+    );
+    if (isDuplicateRange) {
+        console.debug(`[Genius Memory] 이미 ${sIdx}~${eIdx}턴 로어북이 존재하여 중복 생성을 건너뜁니다.`);
+        return;
+    }
+    // (이하 기존 코드 그대로 유지: toastr.info(...) 부터 끝까지!)
+
     toastr.info(`📚 사건 [${eventTitle || "선택 구간"}] (${sIdx}~${eIdx}턴) 정밀 로어북을 생성합니다...`, "🧠 Genius Memory");
 
     const lines = [];
@@ -184,9 +194,14 @@ export async function detectEventsOnTurn() {
     const gmData = getChatGMData();
     if (!chat || !gmData || chat.length < 2) return;
 
+    const currentLastIdx = chat.length - 1;
+    // 🛡️ 방어 1: 똑같은 턴에서 이벤트가 두 번 발생해도 절대 중복 실행하지 않음!
+    if (runtime.lastDetectedTurn === currentLastIdx) return;
+
     runtime.isDetectingEvent = true;
+    runtime.lastDetectedTurn = currentLastIdx;
+
     try {
-        // 최근 유효 대화를 최대 5개까지 가져옴 -> 초반 대화(0, 1, 2, 3, 4턴)에서 Turn 0이 절대 잘리지 않음!
         const recentEntries = [];
         for (let i = chat.length - 1; i >= 0 && recentEntries.length < 5; i--) {
             if (!chat[i] || chat[i].extra?.isSmallSys) continue;
@@ -198,77 +213,118 @@ export async function detectEventsOnTurn() {
 
         if (recentEntries.length === 0) return;
 
-        const firstVisibleTurn = recentEntries[0].turn; // 초반엔 0이 됨
+        const firstVisibleTurn = recentEntries[0].turn;
         const lastTurnIdx = recentEntries[recentEntries.length - 1].turn;
         const recentLines = recentEntries.map(e => e.text);
+
+        // 🛡️ 방어 2: 이미 완료된 최근 사건들의 마지막 턴을 계산 (과거 턴 뒷북 재감지 원천 차단!)
+        let maxCompletedEndTurn = -1;
+        for (const ev of (gmData.micro_events || [])) {
+            const eTurn = Number(ev.endTurn);
+            if (!Number.isNaN(eTurn) && eTurn > maxCompletedEndTurn) {
+                maxCompletedEndTurn = eTurn;
+            }
+        }
+        const recentCompletedStr = (gmData.micro_events || []).slice(-5)
+            .map(e => `- "${e.title}" (Turns ${e.startTurn}~${e.endTurn}) [ALREADY ARCHIVED - DO NOT START AGAIN]`)
+            .join("\n") || "None";
 
         const ongoingListStr = gmData.ongoing_events.length > 0
             ? gmData.ongoing_events.map(e => `- "${e.title}" (Started at Turn ${e.startTurn})`).join("\n")
             : "None";
 
-        const detectorInput = `[Currently Ongoing Events]\n${ongoingListStr}\n\n[Recent Dialogue (Turns ${firstVisibleTurn} to ${lastTurnIdx} — Note: Turn 0 is the opening scene)]\n${recentLines.join("\n\n")}`;
+        const detectorInput = `[Already Completed Events (DO NOT re-detect or restart these)]\n${recentCompletedStr}\n\n[Currently Ongoing Events]\n${ongoingListStr}\n\n[Recent Dialogue (Turns ${firstVisibleTurn} to ${lastTurnIdx} — Note: Turn 0 is the opening scene)]\n${recentLines.join("\n\n")}`;
         const result = await callSubAPI(EVENT_DETECTOR_PROMPT, detectorInput);
         console.debug("[Genius Memory] 사건 감지 AI 응답:\n", result);
 
         let changed = false;
         const lines = result.split(/\r?\n/);
 
+        // 한 번의 감지 턴 안에서 방금 START 시킨 사건을 그 자리에서 바로 END 시키는 자폭 방지용 Set
+        const justStartedTitles = new Set();
+
+        // 1단계: START보다 기존 사건의 END를 먼저 처리
         for (const rawLine of lines) {
             const line = rawLine.replace(/^[\s\-*•\d.)]+/, "").replace(/\*\*/g, "").trim();
-            if (!line) continue;
-
-            // 1) END 파싱
             const endMatch = line.match(/^END\s*:\s*([^|]+)(?:\|\s*(.+))?$/i);
-            if (endMatch) {
-                const endedTitle = cleanTitleText(endMatch[1]);
-                const endTurnNum = Math.min(lastTurnIdx, extractTurnNumber(endMatch[2], lastTurnIdx));
+            if (!endMatch) continue;
 
-                if (endedTitle && endedTitle.toUpperCase() !== "NONE" && gmData.ongoing_events.length > 0) {
-                    const targetIdx = gmData.ongoing_events.findIndex(e =>
-                        endedTitle.toLowerCase().includes(e.title.toLowerCase()) ||
-                        e.title.toLowerCase().includes(endedTitle.toLowerCase())
-                    );
-                    if (targetIdx !== -1) {
-                        const targetEvent = gmData.ongoing_events.splice(targetIdx, 1)[0];
-                        changed = true;
-                        await summarizeLoreEventRange(
-                            targetEvent.title,
-                            targetEvent.startTurn,
-                            Math.max(targetEvent.startTurn, endTurnNum)
-                        );
+            const endedTitle = cleanTitleText(endMatch[1]);
+            const endTurnNum = Math.min(lastTurnIdx, extractTurnNumber(endMatch[2], lastTurnIdx));
+
+            if (endedTitle && endedTitle.toUpperCase() !== "NONE" && gmData.ongoing_events.length > 0) {
+                const targetIdx = gmData.ongoing_events.findIndex(e =>
+                    endedTitle.toLowerCase().includes(e.title.toLowerCase()) ||
+                    e.title.toLowerCase().includes(endedTitle.toLowerCase())
+                );
+                if (targetIdx !== -1) {
+                    const targetEvent = gmData.ongoing_events[targetIdx];
+                    const finalEndTurn = Math.max(targetEvent.startTurn, endTurnNum);
+
+                    // 🛡️ 방어 3: 최소 2개 턴 이상 진행된 사건만 완료 처리 (10~10턴 같은 1턴짜리 파편 생성 방지!)
+                    if (finalEndTurn - targetEvent.startTurn < 1) {
+                        console.debug(`[Genius Memory] [${targetEvent.title}] 사건이 아직 1턴(${targetEvent.startTurn}~${finalEndTurn})뿐이라 종료를 보류합니다.`);
+                        continue;
                     }
-                }
-                continue;
-            }
 
-            // 2) START 파싱
-            const startMatch = line.match(/^START\s*:\s*([^|]+)(?:\|\s*(.+))?$/i);
-            if (startMatch) {
-                const newTitle = cleanTitleText(startMatch[1]);
-                // 초반 첫 사건인데 AI가 번호를 생략했을 경우 firstVisibleTurn(0턴)부터 잡도록 안전 처리
-                const fallbackStart = (gmData.ongoing_events.length === 0 && gmData.micro_events.length === 0 && firstVisibleTurn === 0)
-                    ? 0
-                    : lastTurnIdx;
-                let startTurnNum = extractTurnNumber(startMatch[2], fallbackStart);
-
-                // 만약 첫 사건이고 Turn 0부터 이어진 대화인데 AI가 습관적으로 1이라고 적었을 경우 0턴 오프닝이 빠지지 않게 보정(선택적 안전장치)
-                if (startTurnNum === 1 && firstVisibleTurn === 0 && gmData.ongoing_events.length === 0 && gmData.micro_events.length === 0) {
-                    startTurnNum = 0;
-                }
-
-                if (
-                    newTitle &&
-                    newTitle.toUpperCase() !== "NONE" &&
-                    !gmData.ongoing_events.some(e => e.title.toLowerCase() === newTitle.toLowerCase())
-                ) {
-                    gmData.ongoing_events.push({
-                        title: newTitle,
-                        startTurn: Math.max(0, Math.min(lastTurnIdx, startTurnNum))
-                    });
+                    gmData.ongoing_events.splice(targetIdx, 1);
                     changed = true;
-                    toastr.info(`⏳ 새 사건 감지됨: [${newTitle}] (${startTurnNum}턴~ 기록 중)`, "🧠 Genius Memory", { timeOut: 2500 });
+                    // 방금 끝난 사건의 종료 턴 갱신
+                    if (finalEndTurn > maxCompletedEndTurn) maxCompletedEndTurn = finalEndTurn;
+
+                    await summarizeLoreEventRange(
+                        targetEvent.title,
+                        targetEvent.startTurn,
+                        finalEndTurn
+                    );
                 }
             }
+        }
+
+        // 2단계: 새로운 사건 START 처리
+        for (const rawLine of lines) {
+            const line = rawLine.replace(/^[\s\-*•\d.)]+/, "").replace(/\*\*/g, "").trim();
+            const startMatch = line.match(/^START\s*:\s*([^|]+)(?:\|\s*(.+))?$/i);
+            if (!startMatch) continue;
+
+            const newTitle = cleanTitleText(startMatch[1]);
+            if (!newTitle || newTitle.toUpperCase() === "NONE") continue;
+
+            // 🛡️ 방어 4: 현재 이미 진행 중인 사건이 있으면(특히 1:1 RP에서 같은 장면 중복 걸기 방지), 제목이 비슷하거나 같은 턴에 또 거는 것을 차단
+            const isAlreadyOngoing = gmData.ongoing_events.some(e =>
+                e.title.toLowerCase().includes(newTitle.toLowerCase()) ||
+                newTitle.toLowerCase().includes(e.title.toLowerCase())
+            );
+            const isAlreadyCompleted = (gmData.micro_events || []).slice(-5).some(e =>
+                e.title.toLowerCase() === newTitle.toLowerCase()
+            );
+            if (isAlreadyOngoing || isAlreadyCompleted || justStartedTitles.has(newTitle.toLowerCase())) continue;
+
+            const fallbackStart = (gmData.ongoing_events.length === 0 && gmData.micro_events.length === 0 && firstVisibleTurn === 0)
+                ? 0
+                : lastTurnIdx;
+            let startTurnNum = extractTurnNumber(startMatch[2], fallbackStart);
+
+            if (startTurnNum === 1 && firstVisibleTurn === 0 && gmData.ongoing_events.length === 0 && gmData.micro_events.length === 0) {
+                startTurnNum = 0;
+            }
+
+            // 🛡️ 방어 5: 이미 완료된 이전 사건의 종료 턴(maxCompletedEndTurn) 이하로 과거 턴을 중복해서 다시 잡지 못하게 보정!
+            if (maxCompletedEndTurn >= 0 && startTurnNum <= maxCompletedEndTurn) {
+                // 이미 요약 끝난 구간의 대화를 보고 뒷북으로 START를 외친 경우 -> 현재 새로운 턴이 아니면 무시!
+                if (lastTurnIdx <= maxCompletedEndTurn) continue;
+                startTurnNum = maxCompletedEndTurn + 1;
+            }
+
+            startTurnNum = Math.max(0, Math.min(lastTurnIdx, startTurnNum));
+
+            gmData.ongoing_events.push({
+                title: newTitle,
+                startTurn: startTurnNum
+            });
+            justStartedTitles.add(newTitle.toLowerCase());
+            changed = true;
+            toastr.info(`⏳ 새 사건 감지됨: [${newTitle}] (${startTurnNum}턴~ 기록 중)`, "🧠 Genius Memory", { timeOut: 2500 });
         }
 
         if (changed) {
@@ -433,7 +489,6 @@ export async function runBatchOrAutoSummary(isManualBatch = false) {
             cursor += chunkSize;
         }
         if (isManualBatch) {
-            await detectEventsOnTurn();
             toastr.success("밀린 대화 메인 요약 및 사건 로어북 일괄 생성이 모두 완료되었습니다!", "🧠 Genius Memory");
         }
     } catch (error) {

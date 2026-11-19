@@ -107,3 +107,25 @@ export function unhideRangeAndDivider(gmData, rangeStr) {
         gmData.dividers = (gmData.dividers || []).filter(d => d.mesId !== eIdx);
     }
 }
+
+// state.js 맨 아래에 추가
+export function sortMicroEvents(gmData) {
+    if (!gmData || !Array.isArray(gmData.micro_events)) return;
+    gmData.micro_events.sort((a, b) => {
+        const aStart = Number(a.startTurn);
+        const bStart = Number(b.startTurn);
+        const aValid = !Number.isNaN(aStart);
+        const bValid = !Number.isNaN(bStart);
+
+        if (aValid && bValid) {
+            if (aStart !== bStart) return aStart - bStart;
+            const aEnd = Number(a.endTurn) || aStart;
+            const bEnd = Number(b.endTurn) || bStart;
+            return aEnd - bEnd;
+        }
+        // 숫자가 있는 사건을 앞쪽에, "수동" 기록 사건은 뒤쪽에 배치
+        if (aValid && !bValid) return -1;
+        if (!aValid && bValid) return 1;
+        return 0;
+    });
+}

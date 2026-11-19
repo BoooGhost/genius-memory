@@ -7,7 +7,8 @@ import {
     getChatGMData,
     isRoomEnabled,
     cleanMessageText,
-    setMessagesHidden
+    setMessagesHidden,
+    sortMicroEvents // 👈 추가!
 } from "./state.js";
 import {
     SUMMARY_SYSTEM_PROMPT,
@@ -161,6 +162,8 @@ export async function summarizeLoreEventRange(eventTitle, startTurn, endTurn) {
         content: finalContent,
         vector: vec
     });
+
+    sortMicroEvents(gmData); // 👈 이 한 줄이면 과거 턴 재요약 시 알아서 시간순 제자리로 쏙 들어갑니다!
 
     await saveChatConditional();
     await refreshUIAndPrompt();

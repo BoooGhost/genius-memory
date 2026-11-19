@@ -191,12 +191,20 @@ export function renderLorebookList(gmData) {
         const startDisp = ev.startTurn !== undefined ? ev.startTurn : "?";
         const endDisp = ev.endTurn !== undefined ? ev.endTurn : "?";
 
+        // ui.js 의 renderLorebookList 내부 cardHtml 부분 교체
+        const isFirst = idx === 0;
+        const isLast = idx === events.length - 1;
+
         const cardHtml = `
             <div class="gm-fold-box gm-lore-card ${isRecalled} ${collapsedClass}" data-idx="${idx}">
                 <div class="gm-fold-header">
-                    <span style="color:#93c5fd;">#${idx + 1} (${startDisp}~${endDisp}턴) <b style="color:#fcd34d;">${titleStr}</b></span>
-                    <div style="display:flex; align-items:center; gap:4px;">
+                    <span style="color:#93c5fd; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:4px;">
+                        #${idx + 1} (${startDisp}~${endDisp}턴) <b style="color:#fcd34d;">${titleStr}</b>
+                    </span>
+                    <div style="display:flex; align-items:center; gap:3px; flex-shrink:0;">
                         <span class="gm-lore-badge">${badgeText}</span>
+                        <span class="gm-lore-move-up" data-idx="${idx}" title="위로 이동" style="cursor:${isFirst ? 'default' : 'pointer'}; opacity:${isFirst ? '0.25' : '0.85'}; padding:2px 4px; font-size:0.85em;">▲</span>
+                        <span class="gm-lore-move-down" data-idx="${idx}" title="아래로 이동" style="cursor:${isLast ? 'default' : 'pointer'}; opacity:${isLast ? '0.25' : '0.85'}; padding:2px 4px; font-size:0.85em;">▼</span>
                         <span class="gm-lore-del" data-idx="${idx}" title="이 사건 삭제"><i class="fa-solid fa-trash-can"></i></span>
                         <i class="fa-solid fa-chevron-down gm-fold-icon"></i>
                     </div>

@@ -118,7 +118,8 @@ function setupListeners() {
     });
 
     $(document).on("click", ".gm-fold-header", function (e) {
-        if ($(e.target).closest(".gm-lore-del, .gm-clear-chunk-btn, button").length > 0) return;
+        if ($(e.target).closest(".gm-lore-del, .gm-lore-move-up, .gm-lore-move-down, .gm-clear-chunk-btn, button").length > 0) return;
+        // (이하 기존 코드 그대로)
         const box = $(this).closest(".gm-fold-box");
         box.toggleClass("gm-collapsed");
 
@@ -345,6 +346,36 @@ function setupListeners() {
         if (!gmData) return;
         gmData.micro_events.push({ title: "수동 사건", startTurn: "수동", endTurn: "기록", keys: [], content: "", vector: [] });
         renderLorebookList(gmData);
+    });
+
+    // 로어북 순서 위로 이동 (▲)
+    $(document).on("click", ".gm-lore-move-up", async function (e) {
+        e.stopPropagation();
+        await autoSaveIfDirty(false); // 수정 중이던 텍스트가 날아가지 않게 먼저 저장!
+        const idx = Number($(this).attr("data-idx"));
+        const gmData = getChatGMData();
+        if (!gmData || idx <= 0 || idx >= gmData.micro_events.length) return;
+
+        // 위 항목과 자리 맞바꾸기
+        [gmData.micro_events[idx - 1], gmData.micro_events[idx]] = [gmData.micro_events[idx], gmData.micro_events[idx - 1]];
+        await saveChatConditional();
+        renderLorebookList(gmData);
+        await updatePromptInjection(gmData);
+    });
+
+    // 로어북 순서 아래로 이동 (▼)
+    $(document).on("click", ".gm-lore-move-down", async function (e) {
+        e.stopPropagation();
+        await autoSaveIfDirty(false);
+        const idx = Number($(this).attr("data-idx"));
+        const gmData = getChatGMData();
+        if (!gmData || idx < 0 || idx >= gmData.micro_events.length - 1) return;
+
+        // 아래 항목과 자리 맞바꾸기
+        [gmData.micro_events[idx], gmData.micro_events[idx + 1]] = [gmData.micro_events[idx + 1], gmData.micro_events[idx]];
+        await saveChatConditional();
+        renderLorebookList(gmData);
+        await updatePromptInjection(gmData);
     });
 
     $(document).on("click", ".gm-lore-del", async function (e) {

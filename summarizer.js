@@ -188,6 +188,44 @@ function extractTurnNumber(raw, fallbackTurn) {
     return Number.isNaN(parsed) ? fallbackTurn : parsed; // 0이어도 절대 무시되지 않음!
 }
 
+// 제목 유사 매칭 헬퍼 (조사/공백/특수문자가 살짝 달라도 매칭!)
+function findMatchingOngoingIndex(ongoingList, rawEndedText) {
+    if (!ongoingList || ongoingList.length === 0 || !rawEndedText) return -1;
+
+    // 1. "#1", "#2" 같은 ID 번호가 포함되어 있으면 즉시 정확히 매칭!
+    const idMatch = rawEndedText.match(/#(\d+)/);
+    if (idMatch) {
+        const idx = Number(idMatch[1]) - 1;
+        if (idx >= 0 && idx < ongoingList.length) return idx;
+    }
+
+    const cleanedEnd = rawEndedText.replace(/#\d+\s*/, "").trim().toLowerCase();
+    if (!cleanedEnd || cleanedEnd === "none") return -1;
+
+    // 2. 포함 관계 매칭 (공백 제거 버전도 함께 검사해서 띄어쓰기/조사 차이 극복)
+    const compactEnd = cleanedEnd.replace(/\s+/g, "");
+    let foundIdx = ongoingList.findIndex(e => {
+        const t = e.title.toLowerCase().trim();
+        const compactT = t.replace(/\s+/g, "");
+        return cleanedEnd.includes(t) || t.includes(cleanedEnd) ||
+               compactEnd.includes(compactT) || compactT.includes(compactEnd);
+    });
+    if (foundIdx !== -1) return foundIdx;
+
+    // 3. 어절(단어) 중 하나라도 핵심 단어가 겹치면 매칭
+    const endWords = cleanedEnd.split(/\s+/).filter(w => w.length >= 2);
+    foundIdx = ongoingList.findIndex(e => {
+        const t = e.title.toLowerCase();
+        return endWords.some(w => t.includes(w));
+    });
+    if (foundIdx !== -1) return foundIdx;
+
+    // 4. 현재 기록 중인 사건이 단 1개뿐인데 AI가 분명히 NONE이 아닌 무언가를 END 시켰다면 그 1개가 확실함!
+    if (ongoingList.length === 1) return 0;
+
+    return -1;
+}
+
 export async function detectEventsOnTurn() {
     const s = extension_settings[extensionName];
     if (!isRoomEnabled() || !s.auto_detect_events || runtime.isDetectingEvent) return;
@@ -198,15 +236,15 @@ export async function detectEventsOnTurn() {
     if (!chat || !gmData || chat.length < 2) return;
 
     const currentLastIdx = chat.length - 1;
-    // 🛡️ 방어 1: 똑같은 턴에서 이벤트가 두 번 발생해도 절대 중복 실행하지 않음!
     if (runtime.lastDetectedTurn === currentLastIdx) return;
 
     runtime.isDetectingEvent = true;
     runtime.lastDetectedTurn = currentLastIdx;
 
     try {
+        // 최근 6개 유효 턴까지 넓혀서 장면 전환 전후 흐름이 한눈에 보이게 함
         const recentEntries = [];
-        for (let i = chat.length - 1; i >= 0 && recentEntries.length < 5; i--) {
+        for (let i = chat.length - 1; i >= 0 && recentEntries.length < 6; i--) {
             if (!chat[i] || chat[i].extra?.isSmallSys) continue;
             const cleaned = cleanMessageText(chat[i].mes);
             if (cleaned) {
@@ -220,7 +258,6 @@ export async function detectEventsOnTurn() {
         const lastTurnIdx = recentEntries[recentEntries.length - 1].turn;
         const recentLines = recentEntries.map(e => e.text);
 
-        // 🛡️ 방어 2: 이미 완료된 최근 사건들의 마지막 턴을 계산 (과거 턴 뒷북 재감지 원천 차단!)
         let maxCompletedEndTurn = -1;
         for (const ev of (gmData.micro_events || [])) {
             const eTurn = Number(ev.endTurn);
@@ -228,72 +265,71 @@ export async function detectEventsOnTurn() {
                 maxCompletedEndTurn = eTurn;
             }
         }
+
         const recentCompletedStr = (gmData.micro_events || []).slice(-5)
-            .map(e => `- "${e.title}" (Turns ${e.startTurn}~${e.endTurn}) [ALREADY ARCHIVED - DO NOT START AGAIN]`)
+            .map(e => `- "${e.title}" (Turns ${e.startTurn}~${e.endTurn}) [ALREADY ARCHIVED]`)
             .join("\n") || "None";
 
+        // 🌟 핵심: 진행 중인 사건에 #번호표, 경과 턴 수, 시작 당시 첫 상황 요약을 함께 제공하여 AI가 종료 시점을 즉시 알 수 있게 함!
         const ongoingListStr = gmData.ongoing_events.length > 0
-            ? gmData.ongoing_events.map(e => `- "${e.title}" (Started at Turn ${e.startTurn})`).join("\n")
+            ? gmData.ongoing_events.map((e, idx) => {
+                const duration = Math.max(1, lastTurnIdx - Number(e.startTurn) + 1);
+                const originMes = chat[Number(e.startTurn)] ? cleanMessageText(chat[Number(e.startTurn)].mes).slice(0, 120).replace(/\n+/g, " ") : "";
+                const originHint = originMes ? ` | Opening context: "${originMes}..."` : "";
+                return `- #${idx + 1} "${e.title}" (Started at Turn ${e.startTurn}, Duration: ${duration} turns${originHint})`;
+            }).join("\n")
             : "None";
 
-        const detectorInput = `[Already Completed Events (DO NOT re-detect or restart these)]\n${recentCompletedStr}\n\n[Currently Ongoing Events]\n${ongoingListStr}\n\n[Recent Dialogue (Turns ${firstVisibleTurn} to ${lastTurnIdx} — Note: Turn 0 is the opening scene)]\n${recentLines.join("\n\n")}`;
+        const detectorInput = `[Already Completed Events (DO NOT restart these)]\n${recentCompletedStr}\n\n[Currently Ongoing Events]\n${ongoingListStr}\n\n[Recent Dialogue (Turns ${firstVisibleTurn} to ${lastTurnIdx} — Current Latest Turn: ${lastTurnIdx})]\n${recentLines.join("\n\n")}`;
         const result = await callSubAPI(EVENT_DETECTOR_PROMPT, detectorInput);
         console.debug("[Genius Memory] 사건 감지 AI 응답:\n", result);
 
         let changed = false;
         const lines = result.split(/\r?\n/);
-
-        // 한 번의 감지 턴 안에서 방금 START 시킨 사건을 그 자리에서 바로 END 시키는 자폭 방지용 Set
         const justStartedTitles = new Set();
 
-        // 1단계: START보다 기존 사건의 END를 먼저 처리
+        // 1단계: END 먼저 처리
         for (const rawLine of lines) {
             const line = rawLine.replace(/^[\s\-*•\d.)]+/, "").replace(/\*\*/g, "").trim();
             const endMatch = line.match(/^END\s*:\s*([^|]+)(?:\|\s*(.+))?$/i);
             if (!endMatch) continue;
 
-            const endedTitle = cleanTitleText(endMatch[1]);
-            const endTurnNum = Math.min(lastTurnIdx, extractTurnNumber(endMatch[2], lastTurnIdx));
+            const endedRaw = cleanTitleText(endMatch[1]);
+            if (!endedRaw || endedRaw.toUpperCase() === "NONE" || gmData.ongoing_events.length === 0) continue;
 
-            if (endedTitle && endedTitle.toUpperCase() !== "NONE" && gmData.ongoing_events.length > 0) {
-                const targetIdx = gmData.ongoing_events.findIndex(e =>
-                    endedTitle.toLowerCase().includes(e.title.toLowerCase()) ||
-                    e.title.toLowerCase().includes(endedTitle.toLowerCase())
-                );
-                if (targetIdx !== -1) {
-                    const targetEvent = gmData.ongoing_events[targetIdx];
-                    const finalEndTurn = Math.max(targetEvent.startTurn, endTurnNum);
+            const targetIdx = findMatchingOngoingIndex(gmData.ongoing_events, endedRaw);
+            if (targetIdx !== -1) {
+                const targetEvent = gmData.ongoing_events[targetIdx];
+                const parsedEnd = extractTurnNumber(endMatch[2], lastTurnIdx);
+                const finalEndTurn = Math.max(targetEvent.startTurn, Math.min(lastTurnIdx, parsedEnd));
 
-                    // 🛡️ 방어 3: 최소 2개 턴 이상 진행된 사건만 완료 처리 (10~10턴 같은 1턴짜리 파편 생성 방지!)
-                    if (finalEndTurn - targetEvent.startTurn < 1) {
-                        console.debug(`[Genius Memory] [${targetEvent.title}] 사건이 아직 1턴(${targetEvent.startTurn}~${finalEndTurn})뿐이라 종료를 보류합니다.`);
-                        continue;
-                    }
-
-                    gmData.ongoing_events.splice(targetIdx, 1);
-                    changed = true;
-                    // 방금 끝난 사건의 종료 턴 갱신
-                    if (finalEndTurn > maxCompletedEndTurn) maxCompletedEndTurn = finalEndTurn;
-
-                    await summarizeLoreEventRange(
-                        targetEvent.title,
-                        targetEvent.startTurn,
-                        finalEndTurn
-                    );
+                // 1턴짜리 즉사 파편만 방지 (예: 10~10턴 방지, 최소 0~1턴처럼 2개 메시지 이상일 때 완료)
+                if (finalEndTurn - targetEvent.startTurn < 1) {
+                    console.debug(`[Genius Memory] [${targetEvent.title}] 사건이 아직 1개 턴뿐이라 종료를 보류합니다.`);
+                    continue;
                 }
+
+                gmData.ongoing_events.splice(targetIdx, 1);
+                changed = true;
+                if (finalEndTurn > maxCompletedEndTurn) maxCompletedEndTurn = finalEndTurn;
+
+                await summarizeLoreEventRange(
+                    targetEvent.title,
+                    targetEvent.startTurn,
+                    finalEndTurn
+                );
             }
         }
 
-        // 2단계: 새로운 사건 START 처리
+        // 2단계: START 처리
         for (const rawLine of lines) {
             const line = rawLine.replace(/^[\s\-*•\d.)]+/, "").replace(/\*\*/g, "").trim();
             const startMatch = line.match(/^START\s*:\s*([^|]+)(?:\|\s*(.+))?$/i);
             if (!startMatch) continue;
 
-            const newTitle = cleanTitleText(startMatch[1]);
+            const newTitle = cleanTitleText(startMatch[1]).replace(/^#\d+\s*/, "").trim();
             if (!newTitle || newTitle.toUpperCase() === "NONE") continue;
 
-            // 🛡️ 방어 4: 현재 이미 진행 중인 사건이 있으면(특히 1:1 RP에서 같은 장면 중복 걸기 방지), 제목이 비슷하거나 같은 턴에 또 거는 것을 차단
             const isAlreadyOngoing = gmData.ongoing_events.some(e =>
                 e.title.toLowerCase().includes(newTitle.toLowerCase()) ||
                 newTitle.toLowerCase().includes(e.title.toLowerCase())
@@ -312,9 +348,7 @@ export async function detectEventsOnTurn() {
                 startTurnNum = 0;
             }
 
-            // 🛡️ 방어 5: 이미 완료된 이전 사건의 종료 턴(maxCompletedEndTurn) 이하로 과거 턴을 중복해서 다시 잡지 못하게 보정!
             if (maxCompletedEndTurn >= 0 && startTurnNum <= maxCompletedEndTurn) {
-                // 이미 요약 끝난 구간의 대화를 보고 뒷북으로 START를 외친 경우 -> 현재 새로운 턴이 아니면 무시!
                 if (lastTurnIdx <= maxCompletedEndTurn) continue;
                 startTurnNum = maxCompletedEndTurn + 1;
             }

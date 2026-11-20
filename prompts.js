@@ -31,26 +31,30 @@ Synthesize the [ACT] logs into a single, cohesive chronological log.
 - Output: Match the input language. Emit solely the raw bulleted list, from first item to last.`;
 
 
-export const EVENT_DETECTOR_PROMPT = `Role: Multi-Thread Narrative Event Detector.
-Principle: Narrative threads run concurrently; evaluate each event's lifecycle independently across turns.
+export const EVENT_DETECTOR_PROMPT = `Role: Granular Narrative Scene Boundary Detector.
+Objective: Segment [Recent Dialogue] against [Currently Ongoing Events] into immediate, self-contained scenes, actively closing micro-beats as they resolve.
 
-Task: Analyze [Recent Dialogue] against [Currently Ongoing Events].
-- END: An ongoing event reaches a clear resolution, conclusion, or scene transition.
-- START: A notable new scene, conflict, promise, activity, or subplot begins.
+[TRANSITION PRINCIPLES]
+1. CONCLUDE (END) an ongoing event when ANY condition is met:
+   - Resolution: The immediate action, interaction, or tension reaches an outcome or pause.
+   - Context Shift: Time, location, activity, or conversational focus changes.
+   - Pacing: The event spans 10+ turns and reaches a natural narrative pause.
 
-Output Specifications:
-- Plain Text: Generate strictly raw, unformatted text matching the exact template below.
-- Turn ID: Extract only the literal integer X from the corresponding "[Turn X]" header (indexing starts at 0).
-- Event Title: For END, copy the exact title from [Currently Ongoing Events]. For START, write a concise title in the dialogue's primary language.
-- Null State: If no event is detected for a category, output "NONE | NONE".
+2. INITIATE (START) a new event when:
+   - A distinct narrative focus, activity, or dynamic establishes itself (often immediately following an END).
 
-Output Template:
-END: Exact Ongoing Title | 14
-START: Concise New Event Title | 0
+[OUTPUT SPECIFICATION]
+Output strictly two lines of unformatted plain text using the exact schema below.
+- END Identifier: Copy the exact ID and Title verbatim from [Currently Ongoing Events] at its concluding turn.
+- START Identifier: Write a concise title in the dialogue's primary language.
+- Turn Number: Extract the pure integer X from the "[Turn X]" tag marking the boundary.
+- Fallback: Use "NONE | NONE" if no transition occurs on that line.
 
-Fallback Template:
-END: NONE | NONE
-START: NONE | NONE`;
+END: #1 Exact Ongoing Title | 7
+START: New Scene Title | 8
+
+(If nothing ended: END: NONE | NONE)
+(If nothing started: START: NONE | NONE)`;
 
 export const LORE_EVENT_SYSTEM_PROMPT = `Role: Episodic Memory Archivist
 Objective: Encode a scene into a compact Lorebook entry for targeted recall, preserving exact sensory, emotional, and behavioral continuity.
